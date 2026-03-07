@@ -150,69 +150,74 @@ with tab1:
         fig.update_layout(showlegend=False, height=350)
         st.plotly_chart(fig, use_container_width=True)
 
-# --- TAB 2: NEUER EINTRAG (INTUITIVER SWITCHER) ---
+# --- TAB 2: NEUER EINTRAG (SMART SEARCH & TYPE) ---
 with tab2:
     st.subheader("Eintrag hinzufügen")
     
-    # 1. Vorhandene Kategorien laden
+    # 1. Vorhandene Kategorien aus der Datenbank laden
     if not df.empty:
         existing_cats = sorted(df['Kostenart'].unique().tolist())
     else:
-        existing_cats = ["Strom", "Wasser", "Miete"]
+        existing_cats = []
 
-    # Session State initialisieren, um zwischen Liste und Tippen zu wechseln
-    if "input_mode" not in st.session_state:
-        st.session_state.input_mode = "select"
+    # Hilfsvariable für die Auswahl (im Hintergrund)
+    if "selected_art" not in st.session_state:
+        st.session_state.selected_art = ""
 
-    with st.form("add_form", clear_on_submit=True):
+    # --- DAS SUCHFELD ---
+    # Man tippt einfach den Namen ein
+    art_input = st.text_input(
+        "Kostenart suchen oder neu eingeben", 
+        value=st.session_state.selected_art,
+        placeholder="z.B. Strom, Fitness, Gravel...",
+        key="main_art_input"
+    )
+
+    # --- DIE VORSCHLAGS-LOGIK ---
+    # Wenn getippt wird, suchen wir nach Treffern in der Liste
+    if art_input:
+        matches = [c for c in existing_cats if art_input.lower() in c.lower() and art_input.lower() != c.lower()]
+        
+        if matches:
+            st.write("💡 Meintest du:")
+            # Wir zeigen die ersten 4 Treffer als Buttons an
+            cols = st.columns(len(matches[:4]))
+            for i, match in enumerate(matches[:4]):
+                if cols[i].button(match, key=f"match_{i}", use_container_width=True):
+                    # Bei Klick wird das Textfeld oben mit dem Treffer gefüllt
+                    st.session_state.selected_art = match
+                    st.rerun()
+
+    # --- DAS RESTLICHE FORMULAR ---
+    with st.form("quick_add_form", clear_on_submit=True):
         owner = st.radio("Für wen?", ["Gemeinsam", PERSONEN[0], PERSONEN[1]], horizontal=True)
         
-        # --- DAS INTELLIGENTE FELD ---
-        if st.session_state.input_mode == "select":
-            # Modus: Aus Liste wählen
-            art_selection = st.selectbox(
-                "Kostenart", 
-                options=existing_cats + ["➕ Neu eintragen..."],
-                help="Wähle eine Kategorie oder tippe unten auf 'Neu eintragen'"
-            )
-            if art_selection == "➕ Neu eintragen...":
-                st.session_state.input_mode = "text"
-                st.rerun() # App kurz neu laden, um das Textfeld zu zeigen
-            art_final = art_selection
-        else:
-            # Modus: Frei tippen
-            art_final = st.text_input("Name der neuen Kategorie", placeholder="z.B. Fitnessstudio")
-            if st.button("⬅️ Zurück zur Auswahl"):
-                st.session_state.input_mode = "select"
-                st.rerun()
-
-        # Restliche Felder
         betrag = st.number_input("Betrag in €", min_value=0.0, step=0.01, value=None, placeholder="0,00")
         turnus = st.selectbox("Turnus", list(INTERVALL_MONATE.keys()))
         datum = st.date_input("Nächste Zahlung", datetime.now(), format="DD.MM.YYYY")
         
-        submitted = st.form_submit_button("✅ Speichern", use_container_width=True)
-        
-        if submitted:
-            if betrag and art_final and art_final != "➕ Neu eintragen...":
+        if st.form_submit_button("✅ Speichern", use_container_width=True):
+            # Wir nehmen entweder den Text aus dem Input oder den geklickten Vorschlag
+            final_name = art_input.strip() if art_input else st.session_state.selected_art
+            
+            if betrag and final_name:
                 monat = float(betrag) / INTERVALL_MONATE[turnus]
                 new_row = pd.DataFrame([{
-                    "Eigentümer": owner, "Kostenart": art_final, "Betrag": float(betrag),
+                    "Eigentümer": owner, "Kostenart": final_name, "Betrag": float(betrag),
                     "Intervall": turnus, "Monatlich": float(monat), "Nächste Fälligkeit": datum
                 }])
                 
-                # Speichern
+                # Speichern & Reset
                 updated = pd.concat([df, new_row], ignore_index=True)
                 save = updated.copy()
                 save['Nächste Fälligkeit'] = save['Nächste Fälligkeit'].astype(str)
                 conn.update(worksheet="Nebenkosten", data=save)
                 
-                # Zurück in den Listen-Modus für den nächsten Eintrag
-                st.session_state.input_mode = "select"
-                st.success(f"Gespeichert: {art_final}")
+                st.session_state.selected_art = "" # Reset für nächsten Eintrag
+                st.success(f"Gespeichert: {final_name}")
                 st.rerun()
             else:
-                st.error("Bitte gib einen Betrag und Namen an.")
+                st.error("Bitte Kategorie und Betrag eingeben.")
 # TAB 3: LISTE
 with tab3:
     st.subheader("Alle Kosten")

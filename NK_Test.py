@@ -116,7 +116,7 @@ with tab1:
         st.subheader(f"🔔 Termine für {current_user}")
         today_ts = pd.Timestamp(datetime.now().date())
         my_df = df[(df['Eigentümer'] == "Gemeinsam") | (df['Eigentümer'] == current_user)].copy()
-        due_soon = my_df[(my_df['Nächste fälligkeit'] >= today_ts) & 
+        due_soon = my_df[(my_df['Nächste Fälligkeit'] >= today_ts) & 
                          (my_df['Nächste Fälligkeit'] <= today_ts + pd.Timedelta(days=10))]
         
         if not due_soon.empty:

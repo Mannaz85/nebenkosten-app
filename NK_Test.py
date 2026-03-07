@@ -4,42 +4,59 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
+import extra_streamlit_components as stx
 
-st.write("Verfügbare Keys in Secrets:", list(st.secrets.keys()))
+# --- 1. GRUNDKONFIGURATION ---
+# Trage hier eure Namen ein (müssen exakt so in der Google Tabelle stehen)
+PERSONEN = ["Philipp", "Miri"] 
 
-# --- 1. SICHERHEIT (PASSWORT) ---
+INTERVALL_MONATE = {
+    "monatlich": 1, 
+    "quartalsweise": 3, 
+    "halbjährlich": 6, 
+    "jährlich": 12
+}
+
+st.set_page_config(page_title="Haus-Manager Pro", layout="centered")
+
+# --- 2. SICHERHEIT (PASSWORT & COOKIES) ---
+def get_manager():
+    return stx.CookieManager()
+
+cookie_manager = get_manager()
+
 def check_password():
-    """Gibt True zurück, wenn das Passwort korrekt ist."""
-    if "password" not in st.secrets:
-        st.error("Passwort in den Secrets nicht gesetzt!")
-        return False
-    
-    if "authenticated" not in st.session_state:
-        st.session_state["authenticated"] = False
-
-    if st.session_state["authenticated"]:
+    if st.session_state.get("authenticated"):
         return True
 
-    with st.sidebar:
-        st.title("🔒 Login")
-        pwd_input = st.text_input("App-Passwort", type="password")
-        if st.button("Anmelden"):
-            if pwd_input == st.secrets["password"]:
+    # Cookie-Check
+    auth_cookie = cookie_manager.get("haushalts_auth")
+    if "password" in st.secrets and auth_cookie == st.secrets["password"]:
+        st.session_state["authenticated"] = True
+        return True
+
+    # Login-Maske
+    st.title("🔐 Haus-Manager Login")
+    with st.container(border=True):
+        st.write("Bitte Passwort eingeben:")
+        pwd_input = st.text_input("Passwort", type="password")
+        remember_me = st.checkbox("30 Tage angemeldet bleiben", value=True)
+        
+        if st.button("Anmelden", use_container_width=True):
+            if "password" in st.secrets and pwd_input == st.secrets["password"]:
                 st.session_state["authenticated"] = True
+                if remember_me:
+                    expires_at = datetime.now() + timedelta(days=30)
+                    cookie_manager.set("haushalts_auth", pwd_input, expires_at=expires_at)
                 st.rerun()
             else:
-                st.error("Falsches Passwort!")
+                st.error("Passwort falsch oder in Secrets nicht konfiguriert.")
     return False
 
-# App stoppen, wenn nicht eingeloggt
 if not check_password():
-    st.info("Bitte melde dich in der Seitenleiste an, um deine Daten zu sehen.")
     st.stop()
 
-# --- 2. KONFIGURATION & DATEN ---
-PERSONEN = ["Philipp", "Miri"]
-INTERVALL_MONATE = {"monatlich": 1, "quartalsweise": 3, "halbjährlich": 6, "jährlich": 12}
-
+# --- 3. DATEN-LOGIK ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def check_and_update_dates(df):
@@ -59,7 +76,7 @@ def check_and_update_dates(df):
         save_df = df.copy()
         save_df['Nächste Fälligkeit'] = save_df['Nächste Fälligkeit'].dt.strftime('%Y-%m-%d')
         conn.update(worksheet="Nebenkosten", data=save_df)
-        st.toast("📅 Termine aktualisiert!", icon="🔄")
+        st.toast("📅 Termine automatisch verlängert!", icon="🔄")
     return df
 
 def load_data():
@@ -74,90 +91,108 @@ def load_data():
 
 df = load_data()
 
-# --- 3. UI LAYOUT ---
+# Hilfsfunktion für Euro-Formatierung
+def fmt_eur(val):
+    return f"{val:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+
+# --- 4. SIDEBAR ---
 with st.sidebar:
-    st.divider()
+    st.title("👤 Profil")
     current_user = st.selectbox("Wer nutzt die App?", PERSONEN)
     other_user = PERSONEN[1] if current_user == PERSONEN[0] else PERSONEN[0]
+    st.divider()
     if st.button("Abmelden"):
+        cookie_manager.delete("haushalts_auth")
         st.session_state["authenticated"] = False
         st.rerun()
 
+# --- 5. HAUPTSEITE (TABS) ---
 st.title("🏠 Finanz-Manager")
 tab1, tab2, tab3 = st.tabs(["📊 Status", "➕ Neu", "📋 Liste"])
 
-# --- TAB 1: DASHBOARD ---
+# TAB 1: DASHBOARD
 with tab1:
     if not df.empty:
         st.subheader(f"🔔 Termine für {current_user}")
         today_ts = pd.Timestamp(datetime.now().date())
         my_df = df[(df['Eigentümer'] == "Gemeinsam") | (df['Eigentümer'] == current_user)].copy()
-        due_soon = my_df[(my_df['Nächste Fälligkeit'] >= today_ts) & (my_df['Nächste Fälligkeit'] <= today_ts + pd.Timedelta(days=10))]
+        due_soon = my_df[(my_df['Nächste fälligkeit'] >= today_ts) & 
+                         (my_df['Nächste Fälligkeit'] <= today_ts + pd.Timedelta(days=10))]
         
         if not due_soon.empty:
             for _, row in due_soon.sort_values('Nächste Fälligkeit').iterrows():
-                prefix = "👫" if row['Eigentümer'] == "Gemeinsam" else "👤"
-                st.warning(f"{prefix} {row['Nächste Fälligkeit'].strftime('%d.%m.')}: {row['Kostenart']} — {row['Betrag']:,.2f} €")
+                icon = "👫" if row['Eigentümer'] == "Gemeinsam" else "👤"
+                st.warning(f"{icon} {row['Nächste Fälligkeit'].strftime('%d.%m.')}: {row['Kostenart']} — {fmt_eur(row['Betrag'])}")
         else:
             st.success("Keine Zahlungen in den nächsten 10 Tagen.")
 
         st.divider()
-        shared_total = df[df['Eigentümer'] == "Gemeinsam"]["Monatlich"].sum()
-        my_private = df[df['Eigentümer'] == current_user]["Monatlich"].sum()
         
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Anteil Haus", f"{shared_total/2:,.2f} €")
-        c2.metric("Deine Privaten", f"{my_private:,.2f} €")
-        c3.metric("GESAMT", f"{(shared_total/2)+my_private:,.2f} €")
+        # Berechnung der Last
+        shared_total = df[df['Eigentümer'] == "Gemeinsam"]["Monatlich"].sum()
+        p1_priv = df[df['Eigentümer'] == PERSONEN[0]]["Monatlich"].sum()
+        p2_priv = df[df['Eigentümer'] == PERSONEN[1]]["Monatlich"].sum()
+        
+        p1_total, p2_total = (shared_total/2 + p1_priv), (shared_total/2 + p2_priv)
+        curr_total = p1_total if current_user == PERSONEN[0] else p2_total
+        curr_priv = p1_priv if current_user == PERSONEN[0] else p2_priv
 
-# --- TAB 2: NEUER EINTRAG (DYNAMISCHE KATEGORIEN) ---
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Anteil Haus", fmt_eur(shared_total/2))
+        c2.metric("Deine Privaten", fmt_eur(curr_priv))
+        c3.metric("DEINE LAST", fmt_eur(curr_total))
+
+        st.divider()
+        st.subheader("⚖️ Vergleich der Belastung")
+        compare_df = pd.DataFrame({"Person": PERSONEN, "Monatlich": [p1_total, p2_total]})
+        fig = px.bar(compare_df, x="Person", y="Monatlich", color="Person", text_auto='.2f',
+                     color_discrete_map={PERSONEN[0]: '#636EFA', PERSONEN[1]: '#EF553B'})
+        fig.update_layout(showlegend=False, height=350)
+        st.plotly_chart(fig, use_container_width=True)
+
+# TAB 2: NEUER EINTRAG
 with tab2:
     st.subheader("Eintrag hinzufügen")
-    
-    # Vorhandene Kategorien aus der Spalte lesen
-    if not df.empty:
-        existing_cats = sorted(df['Kostenart'].unique().tolist())
-    else:
-        existing_cats = ["Miete", "Strom", "Internet"] # Start-Kategorien
-
+    existing_cats = sorted(df['Kostenart'].unique().tolist()) if not df.empty else ["Strom", "Wasser"]
     with st.form("add_form", clear_on_submit=True):
-        owner = st.radio("Für wen?", ["Gemeinsam", current_user, other_user], horizontal=True)
+        owner = st.radio("Für wen?", ["Gemeinsam", PERSONEN[0], PERSONEN[1]], horizontal=True, 
+                         index=0 if current_user == PERSONEN[0] else 1)
         
-        col_cat, col_new = st.columns([1, 1])
-        with col_cat:
-            art_select = st.selectbox("Kategorie wählen", existing_cats + ["+ Neue Kategorie..."])
-        with col_new:
-            if art_select == "+ Neue Kategorie...":
-                art_final = st.text_input("Name der neuen Kategorie", placeholder="z.B. Fitnessstudio")
-            else:
-                art_final = art_select
-
+        c_sel, c_new = st.columns(2)
+        with c_sel:
+            sel = st.selectbox("Kategorie", existing_cats + ["+ Neu..."])
+        with c_new:
+            art = st.text_input("Name", placeholder="Kategoriename") if sel == "+ Neu..." else sel
+            
         betrag = st.number_input("Betrag in €", min_value=0.0, step=0.01, value=None, placeholder="0,00")
-        intervall = st.selectbox("Turnus", list(INTERVALL_MONATE.keys()))
+        turnus = st.selectbox("Turnus", list(INTERVALL_MONATE.keys()))
         datum = st.date_input("Nächste Zahlung", datetime.now(), format="DD.MM.YYYY")
         
         if st.form_submit_button("✅ Speichern", use_container_width=True):
-            if betrag and art_final:
-                monatlich = betrag / INTERVALL_MONATE[intervall]
-                new_entry = pd.DataFrame([{"Eigentümer": owner, "Kostenart": art_final, "Betrag": float(betrag), 
-                                           "Intervall": intervall, "Monatlich": float(monatlich), "Nächste Fälligkeit": datum}])
-                updated_df = pd.concat([df, new_entry], ignore_index=True)
-                save_df = updated_df.copy()
-                save_df['Nächste Fälligkeit'] = save_df['Nächste Fälligkeit'].astype(str)
-                conn.update(worksheet="Nebenkosten", data=save_df)
-                st.success(f"Gespeichert: {art_final}")
+            if betrag and art:
+                monat = betrag / INTERVALL_MONATE[turnus]
+                new_row = pd.DataFrame([{"Eigentümer": owner, "Kostenart": art, "Betrag": float(betrag),
+                                         "Intervall": turnus, "Monatlich": float(monat), "Nächste Fälligkeit": datum}])
+                updated = pd.concat([df, new_row], ignore_index=True)
+                save = updated.copy()
+                save['Nächste Fälligkeit'] = save['Nächste Fälligkeit'].astype(str)
+                conn.update(worksheet="Nebenkosten", data=save)
+                st.success("Gespeichert!")
                 st.rerun()
-            else:
-                st.error("Bitte Betrag und Kategorie angeben.")
 
-# --- TAB 3: LISTE ---
+# TAB 3: LISTE
 with tab3:
-    st.subheader("Vollständige Liste")
+    st.subheader("Alle Kosten")
     if not df.empty:
-        edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
+        edited = st.data_editor(df, num_rows="dynamic", use_container_width=True,
+                                column_config={
+                                    "Betrag": st.column_config.NumberColumn(format="%.2f €"),
+                                    "Monatlich": st.column_config.NumberColumn(format="%.2f €"),
+                                    "Nächste Fälligkeit": st.column_config.DateColumn(format="DD.MM.YYYY")
+                                })
         if st.button("Änderungen synchronisieren"):
-            save_df = edited_df.copy()
-            save_df['Nächste Fälligkeit'] = save_df['Nächste Fälligkeit'].astype(str)
-            conn.update(worksheet="Nebenkosten", data=save_df)
-            st.success("Synchronisiert!")
+            save = edited.copy()
+            save['Nächste Fälligkeit'] = save['Nächste Fälligkeit'].astype(str)
+            conn.update(worksheet="Nebenkosten", data=save)
+            st.success("Cloud aktualisiert!")
             st.rerun()

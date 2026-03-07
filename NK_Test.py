@@ -18,7 +18,7 @@ INTERVALL_MONATE = {
 HAUPTKATEGORIEN = [
     "Wohnen & Haushalt", "Mobilität", "Lebensmittel", "Nebenkosten",
     "Versicherungen", "Abos & Medien", "Freizeit & Urlaub", "Kita",
-    "Sparen", "Sonstiges"
+    "Kredite", "Sonstiges"
 ]
 
 st.set_page_config(page_title="Haus-Manager Pro", layout="wide", page_icon="🏦")

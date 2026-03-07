@@ -155,7 +155,6 @@ with tab2:
         own = st.radio("Eigentümer", ["Gemeinsam", PERSONEN[0], PERSONEN[1]], horizontal=True)
         betrag = st.number_input("Betrag in €", min_value=0.0, step=0.01, value=None, placeholder="0,00")
         turnus = st.selectbox("Turnus", list(INTERVALL_MONATE.keys()))
-        # --- FIX: Deutsches Datumsformat für das Eingabefeld ---
         datum = st.date_input("Nächste Zahlung", datetime.now(), format="DD.MM.YYYY")
         
         if st.form_submit_button("✅ Speichern", use_container_width=True):
@@ -175,9 +174,16 @@ with tab2:
 
 with tab3:
     if not df.empty:
+        st.subheader("Vollständige Übersicht")
         edited = st.data_editor(
-            df, num_rows="dynamic", use_container_width=True,
-            column_config={"Nächste Fälligkeit": st.column_config.DateColumn(format="DD.MM.YYYY")}
+            df, 
+            num_rows="dynamic", 
+            use_container_width=True,
+            column_config={
+                "Betrag": st.column_config.NumberColumn("Betrag", format="%.2f €"),
+                "Monatlich": st.column_config.NumberColumn("Monatlich", format="%.2f €"),
+                "Nächste Fälligkeit": st.column_config.DateColumn("Fälligkeit", format="DD.MM.YYYY")
+            }
         )
         if st.button("💾 Speichern"):
             save = edited.copy()

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 # --- KONFIGURATION ---
 # Hier eure echten Namen eintragen!
-PERSONEN = ["User 1", "User 2"] 
+PERSONEN = ["Philipp", "Miri"] 
 KATEGORIEN = [
     "Müllgebühren", "Schornsteinfeger", "Strom", "Wohngebäude", 
     "Internet", "Haus", "Wasser", "KFZ-Versicherung", 

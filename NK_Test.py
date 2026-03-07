@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
 # --- 1. KONFIGURATION ---
-PERSONEN = ["User 1", "User 2"]
+PERSONEN = ["Philipp", "Miri"]
 KATEGORIEN = [
     "Müllgebühren", "Schornsteinfeger", "Strom", "Wohngebäude", 
     "Internet", "Haus", "Wasser", "KFZ-Versicherung", 

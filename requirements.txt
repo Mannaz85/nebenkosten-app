@@ -1,4 +1,6 @@
 streamlit
+streamlit-gsheets
 pandas
 plotly
-st-gsheets-connection
+python-dateutil
+extra-streamlit-components

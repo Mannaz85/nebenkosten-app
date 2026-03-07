@@ -93,6 +93,35 @@ with tab1:
 # --- TAB 2: NEUER EINTRAG ---
 with tab2:
     st.subheader("Eintrag hinzufügen")
+    
+    # Das Formular startet hier
     with st.form("add_form", clear_on_submit=True):
         owner = st.radio("Für wen?", ["Gemeinsam", current_user, other_user], horizontal=True)
         art = st.selectbox("Kostenart", KATEGORIEN)
+        
+        # Betrag-Eingabe (leer beim Start)
+        betrag = st.number_input("Betrag in €", min_value=0.0, step=0.01, value=None, placeholder="0,00")
+        
+        intervall = st.selectbox("Turnus", list(INTERVALL_MAP.keys()))
+        datum = st.date_input("Nächste Zahlung", datetime.now())
+        
+        # --- HIER IST DER ENTSCHEIDENDE KNOPF ---
+        # Er MUSS innerhalb des 'with st.form' Blocks stehen (eingerückt)
+        submitted = st.form_submit_button("✅ Speichern", use_container_width=True)
+        
+        if submitted:
+            if betrag is not None:
+                monatlich = betrag / INTERVALL_MAP[intervall]
+                new_entry = pd.DataFrame([{
+                    "Eigentümer": owner, "Kostenart": art, "Betrag": betrag, 
+                    "Intervall": intervall, "Monatlich": monatlich, "Nächste Fälligkeit": datum
+                }])
+                
+                # Daten in die Cloud schieben
+                updated_df = pd.concat([df, new_entry], ignore_index=True)
+                conn.update(worksheet="Nebenkosten", data=updated_df)
+                
+                st.success(f"Gespeichert für {owner}!")
+                st.rerun()
+            else:
+                st.error("Bitte gib einen Betrag ein, bevor du speicherst.")

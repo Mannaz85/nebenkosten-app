@@ -101,40 +101,71 @@ with st.sidebar:
         st.rerun()
 
 # --- 5. TABS ---
-tab1, tab2, tab3 = st.tabs(["📊 Status", "➕ Neu", "📋 Liste"])
+tab1, tab2, tab3 = st.tabs(["📊 Status & Jahr", "➕ Neu", "📋 Liste"])
 
 with tab1:
     if not df.empty:
+        # --- A. ANSTEHENDE ZAHLUNGEN ---
         st.subheader(f"🔔 Termine für {current_user}")
         today_ts = pd.Timestamp(datetime.now().date())
         my_df = df[(df['Eigentümer'] == "Gemeinsam") | (df['Eigentümer'] == current_user)].copy()
         due_soon = my_df[(my_df['Nächste Fälligkeit'] >= today_ts) & 
                          (my_df['Nächste Fälligkeit'] <= today_ts + pd.Timedelta(days=14))]
+        
         if not due_soon.empty:
             for _, row in due_soon.sort_values('Nächste Fälligkeit').iterrows():
                 icon = "👫" if row['Eigentümer'] == "Gemeinsam" else "👤"
                 st.warning(f"{icon} {row['Nächste Fälligkeit'].strftime('%d.%m.')}: {row['Kostenart']} — {fmt_eur(row['Betrag'])}")
         
         st.divider()
-        shared_total = df[df['Eigentümer'] == "Gemeinsam"]["Monatlich"].sum()
-        p1_priv = df[df['Eigentümer'] == PERSONEN[0]]["Monatlich"].sum()
-        p2_priv = df[df['Eigentümer'] == PERSONEN[1]]["Monatlich"].sum()
-        p1_total, p2_total = (shared_total/2 + p1_priv), (shared_total/2 + p2_priv)
-        curr_priv = p1_priv if current_user == PERSONEN[0] else p2_priv
-        curr_total = p1_total if current_user == PERSONEN[0] else p2_total
 
-        st.subheader("💰 Monatliche Last")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Anteil Haus", fmt_eur(shared_total/2))
-        c2.metric("Deine Privaten", fmt_eur(curr_priv))
-        c3.metric("GESAMT", fmt_eur(curr_total))
+        # --- B. MONATLICHE & JÄHRLICHE METRIKEN ---
+        shared_m = df[df['Eigentümer'] == "Gemeinsam"]["Monatlich"].sum()
+        p1_priv_m = df[df['Eigentümer'] == PERSONEN[0]]["Monatlich"].sum()
+        p2_priv_m = df[df['Eigentümer'] == PERSONEN[1]]["Monatlich"].sum()
+        
+        curr_priv_m = p1_priv_m if current_user == PERSONEN[0] else p2_priv_m
+        total_curr_m = (shared_m / 2) + curr_priv_m
 
+        st.subheader("💰 Kosten-Check")
+        m1, m2 = st.columns(2)
+        with m1:
+            st.write("**Monatlich**")
+            st.metric("Deine Last", fmt_eur(total_curr_m))
+        with m2:
+            st.write("**Jährlich**")
+            st.metric("Hochrechnung", fmt_eur(total_curr_m * 12))
+
+        # --- C. GRAFISCHE KOSTENVERTEILUNG (BALKENDIAGRAMM) ---
         st.divider()
-        compare_df = pd.DataFrame({"Person": PERSONEN, "Euro": [p1_total, p2_total]})
-        fig = px.bar(compare_df, x="Person", y="Euro", color="Person", text_auto='.2f',
-                     color_discrete_map={PERSONEN[0]: '#636EFA', PERSONEN[1]: '#EF553B'})
-        fig.update_layout(showlegend=False, height=350)
-        st.plotly_chart(fig, use_container_width=True)
+        st.subheader("📊 Wo fließt das Geld hin?")
+        
+        # Daten für das Diagramm aufbereiten
+        chart_df = my_df.groupby("Kostenart")["Monatlich"].sum().reset_index()
+        chart_df = chart_df.sort_values("Monatlich", ascending=False)
+
+        fig_costs = px.bar(
+            chart_df, 
+            x="Monatlich", 
+            y="Kostenart", 
+            orientation='h',
+            text_auto='.2f',
+            color="Monatlich",
+            color_continuous_scale="Viridis",
+            labels={"Monatlich": "Euro pro Monat"}
+        )
+        fig_costs.update_layout(showlegend=False, height=400, yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig_costs, use_container_width=True)
+
+        # --- D. JAHRESÜBERSICHT DETAILS ---
+        with st.expander("📂 Details Jahresübersicht"):
+            st.write(f"Voraussichtliche Ausgaben für die nächsten 12 Monate:")
+            st.write(f"- Gemeinsames Haus (Gesamt): {fmt_eur(shared_m * 12)}")
+            st.write(f"- Dein privater Anteil: {fmt_eur(curr_priv_m * 12)}")
+            st.info("Hinweis: Denke an die Schlussrate für das Gravel-Bike in 3 Jahren (ca. 18% des Kaufpreises).")
+
+    else:
+        st.info("Noch keine Daten vorhanden.")
 
 with tab2:
     st.subheader("Eintrag hinzufügen")

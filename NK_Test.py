@@ -16,7 +16,7 @@ INTERVALL_MONATE = {
 }
 HAUPTKATEGORIEN = [
     "Wohnen & Haushalt", "Mobilität", "Lebensmittel", 
-    "Versicherungen", "Abos & Medien", "Freizeit & Urlaub", "Gehalt",
+    "Versicherungen", "Abos & Medien", "Freizeit & Urlaub",
     "Sparen", "Sonstiges"
 ]
 

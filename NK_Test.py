@@ -5,7 +5,7 @@ import plotly.express as px
 from datetime import datetime, timedelta
 
 # --- 1. KONFIGURATION ---
-PERSONEN = ["User 1", "User 2"]  # Trage hier eure Namen ein
+PERSONEN = ["Philipp", "Miri"]  # Trage hier eure Namen ein
 KATEGORIEN = [
     "Müllgebühren", "Schornsteinfeger", "Strom", "Wohngebäude", 
     "Internet", "Haus", "Wasser", "KFZ-Versicherung", 

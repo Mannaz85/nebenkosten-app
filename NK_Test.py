@@ -21,7 +21,7 @@ st.set_page_config(page_title="Haus & Privat App", layout="centered")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
-    data = conn.read(worksheet="Nebenkosten", ttl="0m")
+    data = conn.read(worksheet="Test_Daten", ttl="0m")
     if not data.empty:
         data['Nächste Fälligkeit'] = pd.to_datetime(data['Nächste Fälligkeit'], errors='coerce')
     return data

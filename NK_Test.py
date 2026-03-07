@@ -150,36 +150,72 @@ with tab1:
         fig.update_layout(showlegend=False, height=350)
         st.plotly_chart(fig, use_container_width=True)
 
-# TAB 2: NEUER EINTRAG
+# --- TAB 2: NEUER EINTRAG (DYNAMISCH & FIX) ---
 with tab2:
     st.subheader("Eintrag hinzufügen")
-    existing_cats = sorted(df['Kostenart'].unique().tolist()) if not df.empty else ["Strom", "Wasser"]
+    
+    # Vorhandene Kategorien aus der Tabelle laden
+    if not df.empty and 'Kostenart' in df.columns:
+        # Einzigartige Werte sammeln und leere Werte aussortieren
+        base_cats = df['Kostenart'].dropna().unique().tolist()
+        existing_cats = sorted([str(c) for c in base_cats if str(c).strip() != ""])
+    else:
+        # Fallback, falls die Liste noch komplett leer ist
+        existing_cats = ["Strom", "Wasser", "Internet"]
+
     with st.form("add_form", clear_on_submit=True):
-        owner = st.radio("Für wen?", ["Gemeinsam", PERSONEN[0], PERSONEN[1]], horizontal=True, 
-                         index=0 if current_user == PERSONEN[0] else 1)
+        owner = st.radio("Für wen?", ["Gemeinsam", PERSONEN[0], PERSONEN[1]], horizontal=True)
         
-        c_sel, c_new = st.columns(2)
-        with c_sel:
-            sel = st.selectbox("Kategorie", existing_cats + ["+ Neu..."])
-        with c_new:
-            art = st.text_input("Name", placeholder="Kategoriename") if sel == "+ Neu..." else sel
+        # Auswahl und neues Feld nebeneinander
+        col_sel, col_new = st.columns(2)
+        
+        with col_sel:
+            # Das Dropdown mit allen bisherigen Kostenarten
+            auswahl = st.selectbox("Kategorie wählen", ["-- Vorhandene --"] + existing_cats + ["+ Neue Kategorie..."])
+        
+        with col_new:
+            # Das Textfeld erscheint nur, wenn "+ Neue Kategorie..." gewählt wurde
+            neue_kat = st.text_input("Neue Kategorie eingeben", placeholder="z.B. Versicherung")
             
+        # Logik: Welche Kategorie wird genommen?
+        if auswahl == "+ Neue Kategorie...":
+            art_final = neue_kat.strip()
+        elif auswahl != "-- Vorhandene --":
+            art_final = auswahl
+        else:
+            art_final = None
+
         betrag = st.number_input("Betrag in €", min_value=0.0, step=0.01, value=None, placeholder="0,00")
         turnus = st.selectbox("Turnus", list(INTERVALL_MONATE.keys()))
         datum = st.date_input("Nächste Zahlung", datetime.now(), format="DD.MM.YYYY")
         
-        if st.form_submit_button("✅ Speichern", use_container_width=True):
-            if betrag and art:
-                monat = betrag / INTERVALL_MONATE[turnus]
-                new_row = pd.DataFrame([{"Eigentümer": owner, "Kostenart": art, "Betrag": float(betrag),
-                                         "Intervall": turnus, "Monatlich": float(monat), "Nächste Fälligkeit": datum}])
-                updated = pd.concat([df, new_row], ignore_index=True)
-                save = updated.copy()
-                save['Nächste Fälligkeit'] = save['Nächste Fälligkeit'].astype(str)
-                conn.update(worksheet="Nebenkosten", data=save)
-                st.success("Gespeichert!")
+        submitted = st.form_submit_button("✅ Speichern", use_container_width=True)
+        
+        if submitted:
+            if betrag and art_final:
+                # Monatlichen Betrag berechnen
+                monat = float(betrag) / INTERVALL_MONATE[turnus]
+                
+                # Neuen Datensatz erstellen
+                new_row = pd.DataFrame([{
+                    "Eigentümer": owner, 
+                    "Kostenart": art_final, 
+                    "Betrag": float(betrag),
+                    "Intervall": turnus, 
+                    "Monatlich": float(monat), 
+                    "Nächste Fälligkeit": datum
+                }])
+                
+                # In die Cloud speichern
+                updated_df = pd.concat([df, new_row], ignore_index=True)
+                save_df = updated_df.copy()
+                save_df['Nächste Fälligkeit'] = save_df['Nächste Fälligkeit'].astype(str)
+                
+                conn.update(worksheet="Nebenkosten", data=save_df)
+                st.success(f"'{art_final}' wurde gespeichert!")
                 st.rerun()
-
+            else:
+                st.error("Bitte gib einen Betrag und eine Kategorie an.")
 # TAB 3: LISTE
 with tab3:
     st.subheader("Alle Kosten")

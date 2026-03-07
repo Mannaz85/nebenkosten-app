@@ -6,19 +6,21 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import extra_streamlit_components as stx
 
-# --- 1. DESIGN & CSS (MOBIL-OPTIMIERT) ---
+# --- 1. DESIGN & CSS (MOBIL-OPTIMIERT & DYNAMISCH) ---
 st.set_page_config(page_title="Haus-Manager Pro", layout="wide", page_icon="🏦")
 
+# CSS für einheitliche Karten-Optik
 st.markdown("""
     <style>
-    div[data-testid="stMetric"] {
-        background-color: #f0f2f6 !important;
-        border: 1px solid #d1d5db !important;
-        padding: 15px !important;
-        border-radius: 12px !important;
+    .metric-card {
+        background-color: #f0f2f6;
+        border: 1px solid #d1d5db;
+        padding: 15px;
+        border-radius: 12px;
+        text-align: center;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
     }
-    [data-testid="stMetricLabel"] > div { color: #374151 !important; }
-    [data-testid="stMetricValue"] > div { color: #111827 !important; font-weight: bold !important; }
+    .metric-label { color: #374151; font-size: 14px; margin-bottom: 5px; font-weight: bold; }
     .stButton>button { border-radius: 10px; }
     </style>
     """, unsafe_allow_html=True)
@@ -123,14 +125,20 @@ with tab1:
         
         inc = pr_ein + sh_ein; load = pr_aus + (sh_aus / 2); free = inc - load
 
+        # DYNAMISCHES FARB-STYLING FÜR BUDGET
+        budget_color = "#28a745" if free > 0 else "#dc3545" if free < 0 else "#111827"
+
         st.subheader("Finanz-Check")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Einnahmen", fmt_eur(inc))
-        m2.metric("Ausgaben", fmt_eur(load))
-        m3.metric("Über", fmt_eur(free))
+        c_m1, c_m2, c_m3 = st.columns(3)
+        with c_m1:
+            st.markdown(f'<div class="metric-card"><p class="metric-label">Einnahmen</p><h2 style="color: #111827; margin:0;">{fmt_eur(inc)}</h2></div>', unsafe_allow_html=True)
+        with c_m2:
+            st.markdown(f'<div class="metric-card"><p class="metric-label">Ausgaben</p><h2 style="color: #111827; margin:0;">{fmt_eur(load)}</h2></div>', unsafe_allow_html=True)
+        with c_m3:
+            st.markdown(f'<div class="metric-card"><p class="metric-label">Freies Budget</p><h2 style="color: {budget_color}; margin:0;">{fmt_eur(free)}</h2></div>', unsafe_allow_html=True)
 
         with st.expander("🔍 Details"):
-            st.write(f"Privat: {fmt_eur(pr_aus)} | Haus (50%): {fmt_eur(sh_aus/2)}")
+            st.write(f"Privat: {fmt_eur(pr_aus)} | Haus (50% Anteil): {fmt_eur(sh_aus/2)}")
 
         st.divider()
         st.subheader("🔔 Nächste Termine")
@@ -141,35 +149,20 @@ with tab1:
         if not due.empty:
             for _, r in due.iterrows():
                 st.warning(f"**{r['Nächste Fälligkeit'].strftime('%d.%m.')}**: {r['Kostenart']} ({fmt_eur(r['Betrag'])})")
-        else: st.success("Alles erledigt!")
+        else: st.success("Alles im Plan!")
 
         st.divider()
-        st.subheader("📊 Analyse & Jahres-Vorschau")
+        st.subheader("📊 Ausgaben nach Kategorien")
         
-        chart_config = {'staticPlot': True, 'displayModeBar': False}
-        c1, c2 = st.columns(2)
-        with c1:
-            if not my_aus.empty:
-                fig = px.pie(my_aus.groupby("Hauptkategorie")["Monatlich"].sum().reset_index(), values='Monatlich', names='Hauptkategorie', hole=0.5, title="Kategorien")
-                fig.update_layout(margin=dict(t=30, b=20, l=10, r=10), height=300, showlegend=False)
-                st.plotly_chart(fig, use_container_width=True, config=chart_config)
-        with c2:
-            # JAHRES-VORSCHAU BERECHNUNG
-            if not my_aus.empty:
-                future_dates = [datetime.now() + relativedelta(months=i) for i in range(12)]
-                monthly_forecast = []
-                for f_date in future_dates:
-                    month_sum = 0
-                    for _, row in my_aus.iterrows():
-                        # Vereinfachte Logik: Wie oft fällt es in diesen Monat?
-                        # Da Fixkosten, nehmen wir den monatlichen Wert als Basis
-                        month_sum += row['Monatlich']
-                    monthly_forecast.append({"Monat": f_date.strftime("%b %y"), "Kosten": month_sum})
-                
-                forecast_df = pd.DataFrame(monthly_forecast)
-                fig_forecast = px.bar(forecast_df, x="Monat", y="Kosten", title="Vorschau 12 Monate", color_discrete_sequence=['#636EFA'])
-                fig_forecast.update_layout(margin=dict(t=30, b=20, l=10, r=10), height=300, yaxis_title="")
-                st.plotly_chart(fig_forecast, use_container_width=True, config=chart_config)
+        if not my_aus.empty:
+            chart_config = {'staticPlot': True, 'displayModeBar': False}
+            fig = px.pie(my_aus.groupby("Hauptkategorie")["Monatlich"].sum().reset_index(), 
+                         values='Monatlich', names='Hauptkategorie', hole=0.5)
+            # Legende aktiviert für bessere Lesbarkeit am Handy/PC
+            fig.update_layout(margin=dict(t=30, b=20, l=10, r=10), height=400, showlegend=True)
+            st.plotly_chart(fig, use_container_width=True, config=chart_config)
+        else:
+            st.info("Noch keine Ausgaben für Diagramm vorhanden.")
 
 with tab2:
     st.subheader("➕ Neu")
@@ -189,12 +182,11 @@ with tab2:
 
 with tab3:
     st.subheader("📋 Liste")
-    # FIX: Hier war der Syntaxfehler im vorherigen Skript
     ed = st.data_editor(df, use_container_width=True, num_rows="dynamic", column_config={"Betrag": st.column_config.NumberColumn(format="%.2f €"), "Monatlich": st.column_config.NumberColumn(format="%.2f €"), "Nächste Fälligkeit": st.column_config.DateColumn(format="DD.MM.YYYY")})
-    if st.button("💾 Speichern"):
+    if st.button("💾 Liste Synchronisieren"):
         s = ed.copy()
         s['Monatlich'] = s.apply(lambda r: float(r['Betrag'])/INTERVALL_MONATE.get(str(r['Intervall']).lower(), 1), axis=1)
-        # Die korrekte Zeile ohne Abschneiden:
+        # FIX: Vollständige Zeile für fehlerfreies Speichern
         s['Nächste Fälligkeit'] = pd.to_datetime(s['Nächste Fälligkeit']).dt.strftime('%Y-%m-%d')
         conn.update(worksheet="Nebenkosten", data=s); st.rerun()
 

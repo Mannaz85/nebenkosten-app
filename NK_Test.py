@@ -150,41 +150,43 @@ with tab1:
         fig.update_layout(showlegend=False, height=350)
         st.plotly_chart(fig, use_container_width=True)
 
-# --- TAB 2: NEUER EINTRAG (DYNAMISCH & FIX) ---
+# --- TAB 2: NEUER EINTRAG (INTUITIVER SWITCHER) ---
 with tab2:
     st.subheader("Eintrag hinzufügen")
     
-    # Vorhandene Kategorien aus der Tabelle laden
-    if not df.empty and 'Kostenart' in df.columns:
-        # Einzigartige Werte sammeln und leere Werte aussortieren
-        base_cats = df['Kostenart'].dropna().unique().tolist()
-        existing_cats = sorted([str(c) for c in base_cats if str(c).strip() != ""])
+    # 1. Vorhandene Kategorien laden
+    if not df.empty:
+        existing_cats = sorted(df['Kostenart'].unique().tolist())
     else:
-        # Fallback, falls die Liste noch komplett leer ist
-        existing_cats = ["Strom", "Wasser", "Internet"]
+        existing_cats = ["Strom", "Wasser", "Miete"]
+
+    # Session State initialisieren, um zwischen Liste und Tippen zu wechseln
+    if "input_mode" not in st.session_state:
+        st.session_state.input_mode = "select"
 
     with st.form("add_form", clear_on_submit=True):
         owner = st.radio("Für wen?", ["Gemeinsam", PERSONEN[0], PERSONEN[1]], horizontal=True)
         
-        # Auswahl und neues Feld nebeneinander
-        col_sel, col_new = st.columns(2)
-        
-        with col_sel:
-            # Das Dropdown mit allen bisherigen Kostenarten
-            auswahl = st.selectbox("Kategorie wählen", ["-- Vorhandene --"] + existing_cats + ["+ Neue Kategorie..."])
-        
-        with col_new:
-            # Das Textfeld erscheint nur, wenn "+ Neue Kategorie..." gewählt wurde
-            neue_kat = st.text_input("Neue Kategorie eingeben", placeholder="z.B. Versicherung")
-            
-        # Logik: Welche Kategorie wird genommen?
-        if auswahl == "+ Neue Kategorie...":
-            art_final = neue_kat.strip()
-        elif auswahl != "-- Vorhandene --":
-            art_final = auswahl
+        # --- DAS INTELLIGENTE FELD ---
+        if st.session_state.input_mode == "select":
+            # Modus: Aus Liste wählen
+            art_selection = st.selectbox(
+                "Kostenart", 
+                options=existing_cats + ["➕ Neu eintragen..."],
+                help="Wähle eine Kategorie oder tippe unten auf 'Neu eintragen'"
+            )
+            if art_selection == "➕ Neu eintragen...":
+                st.session_state.input_mode = "text"
+                st.rerun() # App kurz neu laden, um das Textfeld zu zeigen
+            art_final = art_selection
         else:
-            art_final = None
+            # Modus: Frei tippen
+            art_final = st.text_input("Name der neuen Kategorie", placeholder="z.B. Fitnessstudio")
+            if st.button("⬅️ Zurück zur Auswahl"):
+                st.session_state.input_mode = "select"
+                st.rerun()
 
+        # Restliche Felder
         betrag = st.number_input("Betrag in €", min_value=0.0, step=0.01, value=None, placeholder="0,00")
         turnus = st.selectbox("Turnus", list(INTERVALL_MONATE.keys()))
         datum = st.date_input("Nächste Zahlung", datetime.now(), format="DD.MM.YYYY")
@@ -192,30 +194,25 @@ with tab2:
         submitted = st.form_submit_button("✅ Speichern", use_container_width=True)
         
         if submitted:
-            if betrag and art_final:
-                # Monatlichen Betrag berechnen
+            if betrag and art_final and art_final != "➕ Neu eintragen...":
                 monat = float(betrag) / INTERVALL_MONATE[turnus]
-                
-                # Neuen Datensatz erstellen
                 new_row = pd.DataFrame([{
-                    "Eigentümer": owner, 
-                    "Kostenart": art_final, 
-                    "Betrag": float(betrag),
-                    "Intervall": turnus, 
-                    "Monatlich": float(monat), 
-                    "Nächste Fälligkeit": datum
+                    "Eigentümer": owner, "Kostenart": art_final, "Betrag": float(betrag),
+                    "Intervall": turnus, "Monatlich": float(monat), "Nächste Fälligkeit": datum
                 }])
                 
-                # In die Cloud speichern
-                updated_df = pd.concat([df, new_row], ignore_index=True)
-                save_df = updated_df.copy()
-                save_df['Nächste Fälligkeit'] = save_df['Nächste Fälligkeit'].astype(str)
+                # Speichern
+                updated = pd.concat([df, new_row], ignore_index=True)
+                save = updated.copy()
+                save['Nächste Fälligkeit'] = save['Nächste Fälligkeit'].astype(str)
+                conn.update(worksheet="Nebenkosten", data=save)
                 
-                conn.update(worksheet="Nebenkosten", data=save_df)
-                st.success(f"'{art_final}' wurde gespeichert!")
+                # Zurück in den Listen-Modus für den nächsten Eintrag
+                st.session_state.input_mode = "select"
+                st.success(f"Gespeichert: {art_final}")
                 st.rerun()
             else:
-                st.error("Bitte gib einen Betrag und eine Kategorie an.")
+                st.error("Bitte gib einen Betrag und Namen an.")
 # TAB 3: LISTE
 with tab3:
     st.subheader("Alle Kosten")

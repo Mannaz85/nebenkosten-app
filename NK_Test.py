@@ -7,7 +7,7 @@ from dateutil.relativedelta import relativedelta
 import extra_streamlit_components as stx
 
 # --- 1. KONFIGURATION & SETUP ---
-PERSONEN = ["User 1", "User 2"] 
+PERSONEN = ["Philipp", "Miri"] 
 INTERVALL_MONATE = {
     "monatlich": 1, 
     "quartalsweise": 3, 

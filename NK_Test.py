@@ -14,7 +14,6 @@ INTERVALL_MONATE = {
     "halbjährlich": 6, 
     "jährlich": 12
 }
-
 st.set_page_config(page_title="Haus-Manager Pro", layout="centered")
 
 def fmt_eur(val):
@@ -136,22 +135,15 @@ with tab1:
             st.write("**Jährlich**")
             st.metric("Hochrechnung", fmt_eur(total_curr_m * 12))
 
-        # --- C. GRAFISCHE KOSTENVERTEILUNG (BALKENDIAGRAMM) ---
+        # --- C. GRAFISCHE KOSTENVERTEILUNG ---
         st.divider()
         st.subheader("📊 Wo fließt das Geld hin?")
-        
-        # Daten für das Diagramm aufbereiten
         chart_df = my_df.groupby("Kostenart")["Monatlich"].sum().reset_index()
         chart_df = chart_df.sort_values("Monatlich", ascending=False)
 
         fig_costs = px.bar(
-            chart_df, 
-            x="Monatlich", 
-            y="Kostenart", 
-            orientation='h',
-            text_auto='.2f',
-            color="Monatlich",
-            color_continuous_scale="Viridis",
+            chart_df, x="Monatlich", y="Kostenart", orientation='h', text_auto='.2f',
+            color="Monatlich", color_continuous_scale="Viridis",
             labels={"Monatlich": "Euro pro Monat"}
         )
         fig_costs.update_layout(showlegend=False, height=400, yaxis={'categoryorder':'total ascending'})
@@ -162,7 +154,6 @@ with tab1:
             st.write(f"Voraussichtliche Ausgaben für die nächsten 12 Monate:")
             st.write(f"- Gemeinsames Haus (Gesamt): {fmt_eur(shared_m * 12)}")
             st.write(f"- Dein privater Anteil: {fmt_eur(curr_priv_m * 12)}")
-            st.info("Hinweis: Denke an die Schlussrate für das Gravel-Bike in 3 Jahren (ca. 18% des Kaufpreises).")
 
     else:
         st.info("Noch keine Daten vorhanden.")
@@ -207,9 +198,7 @@ with tab3:
     if not df.empty:
         st.subheader("Vollständige Übersicht")
         edited = st.data_editor(
-            df, 
-            num_rows="dynamic", 
-            use_container_width=True,
+            df, num_rows="dynamic", use_container_width=True,
             column_config={
                 "Betrag": st.column_config.NumberColumn("Betrag", format="%.2f €"),
                 "Monatlich": st.column_config.NumberColumn("Monatlich", format="%.2f €"),

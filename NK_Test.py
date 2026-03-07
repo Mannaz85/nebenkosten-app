@@ -6,17 +6,18 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import extra_streamlit_components as stx
 
-# --- 1. KONFIGURATION ---
-PERSONEN = ["Philipp", "Miri"] 
+# --- 1. KONFIGURATION & SETUP ---
+PERSONEN = ["User 1", "User 2"] 
 INTERVALL_MONATE = {
     "monatlich": 1, 
     "quartalsweise": 3, 
     "halbjährlich": 6, 
     "jährlich": 12
 }
+
 HAUPTKATEGORIEN = [
     "Wohnen & Haushalt", "Mobilität", "Lebensmittel", 
-    "Versicherungen", "Abos & Medien", "Freizeit & Urlaub",
+    "Versicherungen", "Abos & Medien", "Freizeit & Urlaub", 
     "Sparen", "Sonstiges"
 ]
 
@@ -91,12 +92,10 @@ def check_and_update_dates(df):
                     updated = True
                     
     if updated:
-        # Haupttabelle aktualisieren
         save_df = df.copy()
         save_df['Nächste Fälligkeit'] = save_df['Nächste Fälligkeit'].dt.strftime('%Y-%m-%d')
         conn.update(worksheet="Nebenkosten", data=save_df)
         
-        # Historie aktualisieren (Reiter wird automatisch erstellt, falls nicht existent)
         if new_history:
             try:
                 hist_df = conn.read(worksheet="Historie", ttl="0m")
@@ -118,7 +117,6 @@ def load_data():
         
         data.columns = [c.strip() for c in data.columns]
         
-        # --- AUTO-MIGRATION FÜR BESTEHENDE DATEN ---
         if "Typ" not in data.columns: data["Typ"] = "Ausgabe"
         if "Hauptkategorie" not in data.columns: data["Hauptkategorie"] = "Sonstiges"
         
@@ -158,14 +156,12 @@ with st.sidebar:
 # --- 5. TABS ---
 tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "➕ Neu", "📋 Liste", "📖 Historie"])
 
-# --- TAB 1: DASHBOARD (BUDGET & GRAFIKEN) ---
+# --- TAB 1: DASHBOARD ---
 with tab1:
     if not df.empty:
-        # Datensätze aufteilen
         ausgaben_df = df[df['Typ'] == "Ausgabe"].copy()
         einnahmen_df = df[df['Typ'] == "Einnahme"].copy()
         
-        # --- A. ANSTEHENDE ZAHLUNGEN (Nur Ausgaben) ---
         st.subheader(f"🔔 Anstehend für {current_user}")
         today_ts = pd.Timestamp(datetime.now().date())
         my_ausgaben = ausgaben_df[(ausgaben_df['Eigentümer'] == "Gemeinsam") | (ausgaben_df['Eigentümer'] == current_user)]
@@ -181,16 +177,12 @@ with tab1:
             
         st.divider()
 
-        # --- B. DAS FREIE BUDGET (Einnahmen vs. Ausgaben) ---
-        # 1. Gemeinsame Werte
         shared_ausg = ausgaben_df[ausgaben_df['Eigentümer'] == "Gemeinsam"]["Monatlich"].sum()
         shared_einn = einnahmen_df[einnahmen_df['Eigentümer'] == "Gemeinsam"]["Monatlich"].sum()
         
-        # 2. Private Werte
         priv_ausg = ausgaben_df[ausgaben_df['Eigentümer'] == current_user]["Monatlich"].sum()
         priv_einn = einnahmen_df[einnahmen_df['Eigentümer'] == current_user]["Monatlich"].sum()
         
-        # 3. Totals für den aktuellen Nutzer
         total_income = priv_einn + (shared_einn / 2)
         total_expense = priv_ausg + (shared_ausg / 2)
         free_budget = total_income - total_expense
@@ -203,7 +195,6 @@ with tab1:
 
         st.divider()
 
-        # --- C. GRAFIKEN (Makro-Kategorien & Einzelposten) ---
         st.subheader("📊 Ausgaben-Analyse")
         gc1, gc2 = st.columns(2)
         
@@ -226,27 +217,27 @@ with tab1:
     else:
         st.info("Noch keine Daten vorhanden.")
 
-# --- TAB 2: NEUER EINTRAG ---
+# --- TAB 2: NEUER EINTRAG (FIXED) ---
 with tab2:
     st.subheader("Transaktion hinzufügen")
     
+    # FIX: Die Auswahl für Einnahme/Ausgabe steht jetzt AUSSERHALB des Formulars.
+    # Dadurch reagiert Streamlit sofort auf deinen Klick.
+    typ = st.radio("Was möchtest du eintragen?", ["Ausgabe", "Einnahme"], horizontal=True)
+    st.write("---")
+    
     with st.form("new_form", clear_on_submit=True):
-        # Einnahme oder Ausgabe?
-        typ = st.radio("Was möchtest du eintragen?", ["Ausgabe", "Einnahme"], horizontal=True)
-        
-        st.write("---")
         own = st.radio("Wem gehört es?", ["Gemeinsam", PERSONEN[0], PERSONEN[1]], horizontal=True)
         
         c1, c2 = st.columns(2)
         with c1:
-            # Hauptkategorie nur bei Ausgaben relevant, bei Einnahmen fest auf "Einnahme"
+            # Die Liste passt sich nun dynamisch an, je nachdem was oben geklickt wurde
             if typ == "Ausgabe":
                 hauptkat = st.selectbox("Hauptkategorie", HAUPTKATEGORIEN)
             else:
                 hauptkat = st.selectbox("Hauptkategorie", ["Gehalt", "Kindergeld", "Sonstige Einnahme"])
                 
         with c2:
-            # Freitext für den genauen Namen
             kostenart = st.text_input("Genaue Bezeichnung", placeholder="z.B. Netflix, Strom, Gehalt...")
             
         betrag = st.number_input("Betrag in €", min_value=0.0, step=0.01, value=None, placeholder="0,00")

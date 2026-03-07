@@ -16,9 +16,9 @@ INTERVALL_MONATE = {
 }
 
 HAUPTKATEGORIEN = [
-    "Wohnen & Haushalt", "Mobilität", "Lebensmittel", "Nebenkosten",
-    "Versicherungen", "Abos & Medien", "Freizeit & Urlaub", "Kita",
-    "Kredite", "Sonstiges"
+    "Wohnen & Haushalt", "Mobilität", "Lebensmittel", 
+    "Versicherungen", "Abos & Medien", "Freizeit & Urlaub", 
+    "Sparen", "Sonstiges"
 ]
 
 st.set_page_config(page_title="Haus-Manager Pro", layout="wide", page_icon="🏦")
@@ -59,7 +59,7 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- 3. DATEN-LOGIK (INKL. HISTORIE & MIGRATION) ---
+# --- 3. DATEN-LOGIK (AUTO-UPDATE & LADEN) ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def check_and_update_dates(df):
@@ -70,9 +70,7 @@ def check_and_update_dates(df):
     for index, row in df.iterrows():
         if pd.notnull(row['Nächste Fälligkeit']):
             current_due = row['Nächste Fälligkeit'].date() if hasattr(row['Nächste Fälligkeit'], 'date') else row['Nächste Fälligkeit']
-            
             if current_due <= today:
-                # 1. Eintrag für die Historie vormerken
                 new_history.append({
                     "Datum": current_due.strftime('%Y-%m-%d'),
                     "Eigentümer": row.get('Eigentümer', ''),
@@ -80,8 +78,6 @@ def check_and_update_dates(df):
                     "Kostenart": row.get('Kostenart', ''),
                     "Betrag": row.get('Betrag', 0.0)
                 })
-                
-                # 2. Datum in die Zukunft schieben
                 turnus = str(row['Intervall']).strip().lower()
                 if turnus in INTERVALL_MONATE:
                     monate_plus = INTERVALL_MONATE[turnus]
@@ -95,18 +91,14 @@ def check_and_update_dates(df):
         save_df = df.copy()
         save_df['Nächste Fälligkeit'] = save_df['Nächste Fälligkeit'].dt.strftime('%Y-%m-%d')
         conn.update(worksheet="Nebenkosten", data=save_df)
-        
         if new_history:
             try:
                 hist_df = conn.read(worksheet="Historie", ttl="0m")
             except:
                 hist_df = pd.DataFrame(columns=["Datum", "Eigentümer", "Typ", "Kostenart", "Betrag"])
-            
             hist_df = pd.concat([hist_df, pd.DataFrame(new_history)], ignore_index=True)
             conn.update(worksheet="Historie", data=hist_df)
-            
-        st.toast("🔄 Termine verlängert & im Logbuch gespeichert!", icon="📖")
-        
+        st.toast("🔄 Termine verlängert & Logbuch aktualisiert!", icon="📖")
     return df
 
 def load_data():
@@ -114,39 +106,27 @@ def load_data():
         data = conn.read(worksheet="Nebenkosten", ttl="0m")
         if data.empty:
             return pd.DataFrame(columns=["Eigentümer", "Typ", "Hauptkategorie", "Kostenart", "Betrag", "Intervall", "Monatlich", "Nächste Fälligkeit"])
-        
         data.columns = [c.strip() for c in data.columns]
-        
         if "Typ" not in data.columns: data["Typ"] = "Ausgabe"
         if "Hauptkategorie" not in data.columns: data["Hauptkategorie"] = "Sonstiges"
-        
         data['Nächste Fälligkeit'] = pd.to_datetime(data['Nächste Fälligkeit'], errors='coerce')
         data = data.dropna(subset=['Nächste Fälligkeit'])
-        
         return check_and_update_dates(data)
     except Exception as e:
-        st.error(f"Datenfehler beim Laden: {e}")
+        st.error(f"Datenfehler: {e}")
         return pd.DataFrame(columns=["Eigentümer", "Typ", "Hauptkategorie", "Kostenart", "Betrag", "Intervall", "Monatlich", "Nächste Fälligkeit"])
 
 df = load_data()
 
-# --- 4. SIDEBAR (PROFIL & BACKUP) ---
+# --- 4. SIDEBAR ---
 with st.sidebar:
     st.title("👤 Profil")
     current_user = st.selectbox("Wer nutzt die App?", PERSONEN)
-    
     st.divider()
     st.subheader("💾 Backup")
     if not df.empty:
         csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Daten als CSV herunterladen",
-            data=csv,
-            file_name=f'finanz_backup_{datetime.now().strftime("%Y%m%d")}.csv',
-            mime='text/csv',
-            use_container_width=True
-        )
-    
+        st.download_button("Daten als CSV exportieren", data=csv, file_name=f'finanz_backup.csv', mime='text/csv', use_container_width=True)
     st.divider()
     if st.button("Abmelden", use_container_width=True):
         cookie_manager.delete("haushalts_auth")
@@ -162,152 +142,115 @@ with tab1:
         ausgaben_df = df[df['Typ'] == "Ausgabe"].copy()
         einnahmen_df = df[df['Typ'] == "Einnahme"].copy()
         
+        # A. TERMINE
         st.subheader(f"🔔 Anstehend für {current_user}")
         today_ts = pd.Timestamp(datetime.now().date())
         my_ausgaben = ausgaben_df[(ausgaben_df['Eigentümer'] == "Gemeinsam") | (ausgaben_df['Eigentümer'] == current_user)]
-        due_soon = my_ausgaben[(my_ausgaben['Nächste Fälligkeit'] >= today_ts) & 
-                               (my_ausgaben['Nächste Fälligkeit'] <= today_ts + pd.Timedelta(days=14))]
+        due_soon = my_ausgaben[(my_ausgaben['Nächste Fälligkeit'] >= today_ts) & (my_ausgaben['Nächste Fälligkeit'] <= today_ts + pd.Timedelta(days=14))]
         
         if not due_soon.empty:
             for _, row in due_soon.sort_values('Nächste Fälligkeit').iterrows():
                 icon = "👫" if row['Eigentümer'] == "Gemeinsam" else "👤"
                 st.warning(f"{icon} {row['Nächste Fälligkeit'].strftime('%d.%m.')}: {row['Kostenart']} — {fmt_eur(row['Betrag'])}")
         else:
-            st.success("Keine Zahlungen in den nächsten 14 Tagen.")
+            st.success("Keine Zahlungen in den nächsten 2 Wochen.")
             
         st.divider()
 
-        shared_ausg = ausgaben_df[ausgaben_df['Eigentümer'] == "Gemeinsam"]["Monatlich"].sum()
-        shared_einn = einnahmen_df[einnahmen_df['Eigentümer'] == "Gemeinsam"]["Monatlich"].sum()
+        # B. BUDGET & AUFSCHLÜSSELUNG (NEU)
+        shared_ausg_full = ausgaben_df[ausgaben_df['Eigentümer'] == "Gemeinsam"]["Monatlich"].sum()
+        priv_ausg_current = ausgaben_df[ausgaben_df['Eigentümer'] == current_user]["Monatlich"].sum()
         
-        priv_ausg = ausgaben_df[ausgaben_df['Eigentümer'] == current_user]["Monatlich"].sum()
-        priv_einn = einnahmen_df[einnahmen_df['Eigentümer'] == current_user]["Monatlich"].sum()
+        shared_einn_half = einnahmen_df[einnahmen_df['Eigentümer'] == "Gemeinsam"]["Monatlich"].sum() / 2
+        priv_einn_current = einnahmen_df[einnahmen_df['Eigentümer'] == current_user]["Monatlich"].sum()
         
-        total_income = priv_einn + (shared_einn / 2)
-        total_expense = priv_ausg + (shared_ausg / 2)
-        free_budget = total_income - total_expense
+        total_income = priv_einn_current + shared_einn_half
+        total_load = priv_ausg_current + (shared_ausg_full / 2)
+        free_budget = total_income - total_load
 
-        st.subheader("💳 Dein Freies Budget (Monat)")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Einnahmen", fmt_eur(total_income))
-        col2.metric("Ausgaben", fmt_eur(total_expense))
-        col3.metric("Freies Budget", fmt_eur(free_budget), delta=f"{free_budget:,.2f} €".replace(".", ","), delta_color="normal")
+        # Metriken für das freie Budget
+        st.subheader("💳 Dein Freies Budget")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Einnahmen (inkl. 50% Haus)", fmt_eur(total_income))
+        m2.metric("Ausgaben (inkl. 50% Haus)", fmt_eur(total_load))
+        m3.metric("Verfügbar", fmt_eur(free_budget))
+
+        # Detaillierte Ausgaben-Metriken (Die gewünschte Aufteilung)
+        with st.expander("🔍 Kosten-Details (Monatlich)", expanded=True):
+            d1, d2, d3 = st.columns(3)
+            d1.write("**Privat**")
+            d1.write(f"Nur {current_user}: {fmt_eur(priv_ausg_current)}")
+            
+            d2.write("**Gemeinsam (Dein Anteil)**")
+            d2.write(f"50% Haus-Kosten: {fmt_eur(shared_ausg_full/2)}")
+            
+            d3.write("**Haus Gesamt**")
+            d3.write(f"100% Haus-Kosten: {fmt_eur(shared_ausg_full)}")
 
         st.divider()
 
+        # C. GRAFIKEN
         st.subheader("📊 Ausgaben-Analyse")
         gc1, gc2 = st.columns(2)
-        
         with gc1:
             st.write("**Nach Hauptkategorien**")
             if not my_ausgaben.empty:
                 pie_df = my_ausgaben.groupby("Hauptkategorie")["Monatlich"].sum().reset_index()
                 fig_pie = px.pie(pie_df, values='Monatlich', names='Hauptkategorie', hole=0.4)
-                fig_pie.update_layout(showlegend=True, height=350, margin=dict(t=0, b=0, l=0, r=0))
                 st.plotly_chart(fig_pie, use_container_width=True)
-                
         with gc2:
-            st.write("**Größte Einzelposten**")
+            st.write("**Größte Posten**")
             if not my_ausgaben.empty:
                 bar_df = my_ausgaben.groupby("Kostenart")["Monatlich"].sum().reset_index().sort_values("Monatlich", ascending=False).head(8)
-                fig_bar = px.bar(bar_df, x="Monatlich", y="Kostenart", orientation='h', text_auto='.0f', color="Monatlich", color_continuous_scale="Blues")
-                fig_bar.update_layout(showlegend=False, height=350, yaxis={'categoryorder':'total ascending'}, margin=dict(t=0, b=0, l=0, r=0))
+                fig_bar = px.bar(bar_df, x="Monatlich", y="Kostenart", orientation='h', text_auto='.0f')
                 st.plotly_chart(fig_bar, use_container_width=True)
-                
-    else:
-        st.info("Noch keine Daten vorhanden.")
 
-# --- TAB 2: NEUER EINTRAG (FIXED) ---
+# --- TAB 2: NEUER EINTRAG ---
 with tab2:
     st.subheader("Transaktion hinzufügen")
-    
-    # FIX: Die Auswahl für Einnahme/Ausgabe steht jetzt AUSSERHALB des Formulars.
-    # Dadurch reagiert Streamlit sofort auf deinen Klick.
-    typ = st.radio("Was möchtest du eintragen?", ["Ausgabe", "Einnahme"], horizontal=True)
+    typ = st.radio("Typ", ["Ausgabe", "Einnahme"], horizontal=True)
     st.write("---")
-    
     with st.form("new_form", clear_on_submit=True):
-        own = st.radio("Wem gehört es?", ["Gemeinsam", PERSONEN[0], PERSONEN[1]], horizontal=True)
-        
+        own = st.radio("Besitzer", ["Gemeinsam", PERSONEN[0], PERSONEN[1]], horizontal=True)
         c1, c2 = st.columns(2)
         with c1:
-            # Die Liste passt sich nun dynamisch an, je nachdem was oben geklickt wurde
-            if typ == "Ausgabe":
-                hauptkat = st.selectbox("Hauptkategorie", HAUPTKATEGORIEN)
-            else:
-                hauptkat = st.selectbox("Hauptkategorie", ["Gehalt", "Kindergeld", "Sonstige Einnahme"])
-                
+            kat_list = HAUPTKATEGORIEN if typ == "Ausgabe" else ["Gehalt", "Kindergeld", "Sonstige Einnahme"]
+            hauptkat = st.selectbox("Hauptkategorie", kat_list)
         with c2:
-            kostenart = st.text_input("Genaue Bezeichnung", placeholder="z.B. Netflix, Strom, Gehalt...")
-            
-        betrag = st.number_input("Betrag in €", min_value=0.0, step=0.01, value=None, placeholder="0,00")
-        
+            kostenart = st.text_input("Name", placeholder="z.B. Miete, Gehalt...")
+        betrag = st.number_input("Betrag €", min_value=0.0, step=0.01, value=None)
         cc1, cc2 = st.columns(2)
-        with cc1:
-            turnus = st.selectbox("Turnus", list(INTERVALL_MONATE.keys()))
-        with cc2:
-            datum = st.date_input("Erste / Nächste Fälligkeit", datetime.now(), format="DD.MM.YYYY")
+        with cc1: turnus = st.selectbox("Intervall", list(INTERVALL_MONATE.keys()))
+        with cc2: datum = st.date_input("Datum", datetime.now(), format="DD.MM.YYYY")
         
         if st.form_submit_button("✅ Speichern", use_container_width=True):
             if betrag and kostenart:
                 monat = float(betrag) / INTERVALL_MONATE[turnus]
-                new_row = pd.DataFrame([{
-                    "Eigentümer": own, 
-                    "Typ": typ,
-                    "Hauptkategorie": hauptkat,
-                    "Kostenart": kostenart.strip(), 
-                    "Betrag": float(betrag),
-                    "Intervall": turnus, 
-                    "Monatlich": float(monat), 
-                    "Nächste Fälligkeit": pd.to_datetime(datum)
-                }])
+                new_row = pd.DataFrame([{"Eigentümer": own, "Typ": typ, "Hauptkategorie": hauptkat, "Kostenart": kostenart.strip(), "Betrag": float(betrag), "Intervall": turnus, "Monatlich": float(monat), "Nächste Fälligkeit": pd.to_datetime(datum)}])
                 updated = pd.concat([df, new_row], ignore_index=True)
                 save = updated.copy()
                 save['Nächste Fälligkeit'] = save['Nächste Fälligkeit'].dt.strftime('%Y-%m-%d')
                 conn.update(worksheet="Nebenkosten", data=save)
-                st.success(f"{typ} '{kostenart}' gespeichert!")
+                st.success(f"Gespeichert!")
                 st.rerun()
-            else:
-                st.error("Bitte Bezeichnung und Betrag angeben.")
 
-# --- TAB 3: LISTE (EDITOR) ---
+# --- TAB 3: LISTE ---
 with tab3:
-    st.subheader("Alle Einträge bearbeiten")
+    st.subheader("Bearbeiten")
     if not df.empty:
-        edited = st.data_editor(
-            df, 
-            num_rows="dynamic", 
-            use_container_width=True,
-            column_config={
-                "Typ": st.column_config.SelectboxColumn("Typ", options=["Ausgabe", "Einnahme"]),
-                "Hauptkategorie": st.column_config.SelectboxColumn("Kategorie", options=HAUPTKATEGORIEN + ["Gehalt", "Kindergeld", "Sonstige Einnahme"]),
-                "Betrag": st.column_config.NumberColumn("Betrag", format="%.2f €"),
-                "Monatlich": st.column_config.NumberColumn("Monatlich", format="%.2f €"),
-                "Nächste Fälligkeit": st.column_config.DateColumn("Fälligkeit", format="DD.MM.YYYY")
-            }
-        )
-        if st.button("💾 Änderungen in Cloud speichern"):
+        edited = st.data_editor(df, num_rows="dynamic", use_container_width=True, column_config={"Betrag": st.column_config.NumberColumn(format="%.2f €"), "Monatlich": st.column_config.NumberColumn(format="%.2f €"), "Nächste Fälligkeit": st.column_config.DateColumn(format="DD.MM.YYYY")})
+        if st.button("💾 Cloud speichern"):
             save = edited.copy()
             save['Monatlich'] = save.apply(lambda r: float(r['Betrag']) / INTERVALL_MONATE.get(str(r['Intervall']).lower(), 1), axis=1)
             save['Nächste Fälligkeit'] = pd.to_datetime(save['Nächste Fälligkeit']).dt.strftime('%Y-%m-%d')
             conn.update(worksheet="Nebenkosten", data=save)
-            st.success("Tabelle aktualisiert!")
             st.rerun()
 
-# --- TAB 4: HISTORIE (LOGBUCH) ---
+# --- TAB 4: HISTORIE ---
 with tab4:
-    st.subheader("📖 Logbuch der Zahlungen")
-    st.write("Hier wird automatisch protokolliert, wenn eine Zahlung ihr Fälligkeitsdatum erreicht hat.")
+    st.subheader("📖 Logbuch")
     try:
         hist_df = conn.read(worksheet="Historie", ttl="0m")
         if not hist_df.empty:
-            hist_df['Datum'] = pd.to_datetime(hist_df['Datum']).dt.strftime('%d.%m.%Y')
-            st.dataframe(
-                hist_df.sort_values("Datum", ascending=False), 
-                use_container_width=True,
-                column_config={"Betrag": st.column_config.NumberColumn("Betrag", format="%.2f €")}
-            )
-        else:
-            st.info("Das Logbuch ist noch leer.")
-    except:
-        st.info("Das Logbuch wird beim ersten automatischen Termin-Update erstellt.")
+            st.dataframe(hist_df.sort_values("Datum", ascending=False), use_container_width=True)
+    except: st.info("Noch keine Historie.")

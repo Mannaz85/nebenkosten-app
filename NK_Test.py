@@ -11,7 +11,6 @@ st.set_page_config(page_title="Haus-Manager Pro", layout="wide", page_icon="🏦
 
 st.markdown("""
     <style>
-    /* Kontrast-Fix für Metriken (Immer lesbar, egal ob Dark/Light Mode) */
     div[data-testid="stMetric"] {
         background-color: #f0f2f6 !important;
         border: 1px solid #d1d5db !important;
@@ -20,10 +19,7 @@ st.markdown("""
     }
     [data-testid="stMetricLabel"] > div { color: #374151 !important; }
     [data-testid="stMetricValue"] > div { color: #111827 !important; font-weight: bold !important; }
-    
-    /* Buttons & Design */
     .stButton>button { border-radius: 10px; }
-    .stTabs [data-baseweb="tab"] { font-size: 14px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -47,7 +43,7 @@ def check_password():
         st.session_state["authenticated"] = True
         return True
     
-    st.markdown("<h2 style='text-align: center;'>🏦 Haus-Manager</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center;'>🏦 Haus-Manager Login</h2>", unsafe_allow_html=True)
     with st.container():
         _, col, _ = st.columns([1,2,1])
         with col:
@@ -104,7 +100,7 @@ def load_data():
 
 df = load_data()
 
-# --- 5. SIDEBAR (WICHTIG: Hier wird current_user definiert!) ---
+# --- 5. SIDEBAR ---
 with st.sidebar:
     st.title("👤 Profil")
     current_user = st.selectbox("Wer bist du?", PERSONEN)
@@ -148,21 +144,32 @@ with tab1:
         else: st.success("Alles erledigt!")
 
         st.divider()
-        st.subheader("📊 Analyse")
-        c1, c2 = st.columns(2)
-        # Statische Charts ohne Zoom/Verschieben
-        chart_config = {'staticPlot': True, 'displayModeBar': False}
+        st.subheader("📊 Analyse & Jahres-Vorschau")
         
+        chart_config = {'staticPlot': True, 'displayModeBar': False}
+        c1, c2 = st.columns(2)
         with c1:
             if not my_aus.empty:
-                fig = px.pie(my_aus.groupby("Hauptkategorie")["Monatlich"].sum().reset_index(), values='Monatlich', names='Hauptkategorie', hole=0.5)
-                fig.update_layout(margin=dict(t=20, b=20, l=10, r=10), height=300, showlegend=False)
+                fig = px.pie(my_aus.groupby("Hauptkategorie")["Monatlich"].sum().reset_index(), values='Monatlich', names='Hauptkategorie', hole=0.5, title="Kategorien")
+                fig.update_layout(margin=dict(t=30, b=20, l=10, r=10), height=300, showlegend=False)
                 st.plotly_chart(fig, use_container_width=True, config=chart_config)
         with c2:
+            # JAHRES-VORSCHAU BERECHNUNG
             if not my_aus.empty:
-                bar = px.bar(my_aus.groupby("Kostenart")["Monatlich"].sum().reset_index().sort_values("Monatlich", ascending=False).head(5), x="Monatlich", y="Kostenart", orientation='h')
-                bar.update_layout(margin=dict(t=20, b=20, l=10, r=10), height=300, yaxis={'categoryorder':'total ascending'})
-                st.plotly_chart(bar, use_container_width=True, config=chart_config)
+                future_dates = [datetime.now() + relativedelta(months=i) for i in range(12)]
+                monthly_forecast = []
+                for f_date in future_dates:
+                    month_sum = 0
+                    for _, row in my_aus.iterrows():
+                        # Vereinfachte Logik: Wie oft fällt es in diesen Monat?
+                        # Da Fixkosten, nehmen wir den monatlichen Wert als Basis
+                        month_sum += row['Monatlich']
+                    monthly_forecast.append({"Monat": f_date.strftime("%b %y"), "Kosten": month_sum})
+                
+                forecast_df = pd.DataFrame(monthly_forecast)
+                fig_forecast = px.bar(forecast_df, x="Monat", y="Kosten", title="Vorschau 12 Monate", color_discrete_sequence=['#636EFA'])
+                fig_forecast.update_layout(margin=dict(t=30, b=20, l=10, r=10), height=300, yaxis_title="")
+                st.plotly_chart(fig_forecast, use_container_width=True, config=chart_config)
 
 with tab2:
     st.subheader("➕ Neu")
@@ -182,7 +189,18 @@ with tab2:
 
 with tab3:
     st.subheader("📋 Liste")
+    # FIX: Hier war der Syntaxfehler im vorherigen Skript
     ed = st.data_editor(df, use_container_width=True, num_rows="dynamic", column_config={"Betrag": st.column_config.NumberColumn(format="%.2f €"), "Monatlich": st.column_config.NumberColumn(format="%.2f €"), "Nächste Fälligkeit": st.column_config.DateColumn(format="DD.MM.YYYY")})
     if st.button("💾 Speichern"):
-        s = ed.copy(); s['Monatlich'] = s.apply(lambda r: float(r['Betrag'])/INTERVALL_MONATE.get(str(r['Intervall']).lower(), 1), axis=1)
-        s['Nächste Fälligkeit'] = pd.to_datetime(s['
+        s = ed.copy()
+        s['Monatlich'] = s.apply(lambda r: float(r['Betrag'])/INTERVALL_MONATE.get(str(r['Intervall']).lower(), 1), axis=1)
+        # Die korrekte Zeile ohne Abschneiden:
+        s['Nächste Fälligkeit'] = pd.to_datetime(s['Nächste Fälligkeit']).dt.strftime('%Y-%m-%d')
+        conn.update(worksheet="Nebenkosten", data=s); st.rerun()
+
+with tab4:
+    st.subheader("📖 Logbuch")
+    try:
+        h = conn.read(worksheet="Historie", ttl="0m")
+        if not h.empty: st.dataframe(h.sort_values("Datum", ascending=False), use_container_width=True)
+    except: st.info("Noch kein Verlauf.")

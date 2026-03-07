@@ -39,33 +39,38 @@ st.title("🏠 Finanz-Manager")
 
 tab1, tab2, tab3 = st.tabs(["📊 Mein Status", "➕ Neu", "📋 Alle Kosten"])
 
-# --- TAB 1: STATUS & INDIVIDUELLE KOSTEN ---
+# --- TAB 1: STATUS & KOSTEN ---
 with tab1:
     if not df.empty:
         st.subheader(f"🔔 Termine für {current_user}")
-        today = datetime.now().date()
         
-        # Daten filtern: Gemeinsam oder eigene Sachen
+        # FIX: Wir nutzen pd.Timestamp für absolute Kompatibilität
+        today = pd.Timestamp(datetime.now().date())
+        
+        # Daten kopieren und sicherstellen, dass alles Timestamps sind
         my_df = df[(df['Eigentümer'] == "Gemeinsam") | (df['Eigentümer'] == current_user)].copy()
-        my_df['Datum_Check'] = my_df['Nächste Fälligkeit'].dt.date
+        my_df['Nächste Fälligkeit'] = pd.to_datetime(my_df['Nächste Fälligkeit'])
         
-        # Check für die nächsten 10 Tage
-        due_10 = my_df[(my_df['Datum_Check'] >= today - timedelta(days=30)) & 
-                       (my_df['Datum_Check'] <= today + timedelta(days=10))]
+        # Zeitfenster berechnen (heute minus 30 Tage bis heute plus 10 Tage)
+        start_date = today - pd.Timedelta(days=30)
+        end_date = today + pd.Timedelta(days=10)
+        
+        # Der Vergleich funktioniert jetzt, da beide Seiten Timestamps sind
+        due_10 = my_df[(my_df['Nächste Fälligkeit'] >= start_date) & 
+                       (my_df['Nächste Fälligkeit'] <= end_date)]
         
         if not due_10.empty:
-            for _, row in due_10.sort_values('Datum_Check').iterrows():
+            for _, row in due_10.sort_values('Nächste Fälligkeit').iterrows():
                 prefix = "👫" if row['Eigentümer'] == "Gemeinsam" else "👤"
-                datum_de = row['Datum_Check'].strftime('%d.%m.%Y')
-                if row['Datum_Check'] < today:
+                # Anzeige im deutschen Format
+                datum_de = row['Nächste Fälligkeit'].strftime('%d.%m.%Y')
+                
+                if row['Nächste Fälligkeit'] < today:
                     st.error(f"{prefix} ÜBERFÄLLIG: {row['Kostenart']} ({datum_de})")
                 else:
                     st.warning(f"{prefix} {datum_de}: {row['Kostenart']} — {row['Betrag']:,.2f} €")
         else:
             st.success("Keine dringenden Zahlungen.")
-
-        st.divider()
-
         # --- INDIVIDUELLE BERECHNUNG ---
         st.subheader("💰 Deine monatliche Last")
         

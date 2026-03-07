@@ -5,6 +5,8 @@ import plotly.express as px
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
+st.write("Verfügbare Keys in Secrets:", list(st.secrets.keys()))
+
 # --- 1. SICHERHEIT (PASSWORT) ---
 def check_password():
     """Gibt True zurück, wenn das Passwort korrekt ist."""

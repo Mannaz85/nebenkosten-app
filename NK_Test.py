@@ -6,39 +6,24 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import extra_streamlit_components as stx
 
-# --- 1. MOBIL-OPTIMIERTES DESIGN (CSS FIX) ---
+# --- 1. DESIGN & CSS (MOBIL-OPTIMIERT) ---
 st.set_page_config(page_title="Haus-Manager Pro", layout="wide", page_icon="🏦")
 
 st.markdown("""
     <style>
-    /* Hintergrund-Fix für Lesbarkeit */
-    .stApp {
-        background-color: transparent;
-    }
-    /* Metriken: Hintergrund und Textfarbe festlegen */
+    /* Kontrast-Fix für Metriken (Immer lesbar, egal ob Dark/Light Mode) */
     div[data-testid="stMetric"] {
         background-color: #f0f2f6 !important;
         border: 1px solid #d1d5db !important;
         padding: 15px !important;
         border-radius: 12px !important;
     }
-    /* Text in Metriken erzwingen (Fix für Weiß-auf-Weiß) */
-    [data-testid="stMetricLabel"] > div {
-        color: #374151 !important; /* Dunkelgrau */
-    }
-    [data-testid="stMetricValue"] > div {
-        color: #111827 !important; /* Fast Schwarz */
-    }
-    /* Info-Boxen am Handy besser lesbar */
-    .stAlert {
-        border-radius: 10px;
-        border: none;
-    }
-    /* Tabs am Handy */
-    .stTabs [data-baseweb="tab"] {
-        font-size: 14px;
-        padding: 8px;
-    }
+    [data-testid="stMetricLabel"] > div { color: #374151 !important; }
+    [data-testid="stMetricValue"] > div { color: #111827 !important; font-weight: bold !important; }
+    
+    /* Buttons & Design */
+    .stButton>button { border-radius: 10px; }
+    .stTabs [data-baseweb="tab"] { font-size: 14px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -51,7 +36,7 @@ def fmt_eur(val):
     if val is None or pd.isna(val): return "0,00 €"
     return f"{val:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
 
-# --- 3. SICHERHEIT ---
+# --- 3. SICHERHEIT (LOGIN) ---
 def get_manager(): return stx.CookieManager()
 cookie_manager = get_manager()
 
@@ -64,7 +49,7 @@ def check_password():
     
     st.markdown("<h2 style='text-align: center;'>🏦 Haus-Manager</h2>", unsafe_allow_html=True)
     with st.container():
-        _, col, _ = st.columns([1,3,1])
+        _, col, _ = st.columns([1,2,1])
         with col:
             with st.form("Login"):
                 pwd_input = st.text_input("Passwort", type="password")
@@ -119,12 +104,21 @@ def load_data():
 
 df = load_data()
 
-# --- 5. TABS ---
+# --- 5. SIDEBAR (WICHTIG: Hier wird current_user definiert!) ---
+with st.sidebar:
+    st.title("👤 Profil")
+    current_user = st.selectbox("Wer bist du?", PERSONEN)
+    st.divider()
+    if not df.empty:
+        st.download_button("💾 Backup CSV", df.to_csv(index=False).encode('utf-8'), "finanz_backup.csv", "text/csv", use_container_width=True)
+    if st.button("🚪 Logout", use_container_width=True):
+        cookie_manager.delete("haushalts_auth"); st.session_state["authenticated"] = False; st.rerun()
+
+# --- 6. HAUPTSEITE (TABS) ---
 tab1, tab2, tab3, tab4 = st.tabs(["📊 Status", "➕ Neu", "📋 Liste", "📖 Log"])
 
 with tab1:
     if not df.empty:
-        # BUDGET BERECHNUNG
         aus_df = df[df['Typ'] == "Ausgabe"]; ein_df = df[df['Typ'] == "Einnahme"]
         sh_aus = aus_df[aus_df['Eigentümer'] == "Gemeinsam"]["Monatlich"].sum()
         sh_ein = ein_df[ein_df['Eigentümer'] == "Gemeinsam"]["Monatlich"].sum() / 2
@@ -133,7 +127,6 @@ with tab1:
         
         inc = pr_ein + sh_ein; load = pr_aus + (sh_aus / 2); free = inc - load
 
-        # KENNZAHLEN (Dunkler Text erzwungen)
         st.subheader("Finanz-Check")
         m1, m2, m3 = st.columns(3)
         m1.metric("Einnahmen", fmt_eur(inc))
@@ -144,8 +137,6 @@ with tab1:
             st.write(f"Privat: {fmt_eur(pr_aus)} | Haus (50%): {fmt_eur(sh_aus/2)}")
 
         st.divider()
-
-        # TERMINE
         st.subheader("🔔 Nächste Termine")
         t_ts = pd.Timestamp(datetime.now().date())
         my_aus = aus_df[(aus_df['Eigentümer'] == "Gemeinsam") | (aus_df['Eigentümer'] == current_user)]
@@ -154,14 +145,12 @@ with tab1:
         if not due.empty:
             for _, r in due.iterrows():
                 st.warning(f"**{r['Nächste Fälligkeit'].strftime('%d.%m.')}**: {r['Kostenart']} ({fmt_eur(r['Betrag'])})")
-        else: st.success("Alles im Plan!")
+        else: st.success("Alles erledigt!")
 
         st.divider()
-
-        # CHARTS (STATISCH - Nicht mehr veränderbar)
         st.subheader("📊 Analyse")
         c1, c2 = st.columns(2)
-        # Konfiguration für statische Plots
+        # Statische Charts ohne Zoom/Verschieben
         chart_config = {'staticPlot': True, 'displayModeBar': False}
         
         with c1:
@@ -175,13 +164,12 @@ with tab1:
                 bar.update_layout(margin=dict(t=20, b=20, l=10, r=10), height=300, yaxis={'categoryorder':'total ascending'})
                 st.plotly_chart(bar, use_container_width=True, config=chart_config)
 
-# (Restliche Tabs bleiben funktional gleich, nur die Anzeige wurde optimiert)
 with tab2:
     st.subheader("➕ Neu")
     t = st.radio("Typ", ["Ausgabe", "Einnahme"], horizontal=True)
-    with st.form("new_entry"):
+    with st.form("new_entry", clear_on_submit=True):
         o = st.radio("Wer?", ["Gemeinsam", PERSONEN[0], PERSONEN[1]], horizontal=True)
-        k = st.selectbox("Kategorie", HAUPTKATEGORIEN if t=="Ausgabe" else ["Gehalt", "Zinsen"])
+        k = st.selectbox("Kategorie", HAUPTKATEGORIEN if t=="Ausgabe" else ["Gehalt", "Zinsen", "Sonstiges"])
         n = st.text_input("Bezeichnung")
         v = st.number_input("Betrag €", step=0.01)
         tur = st.selectbox("Intervall", list(INTERVALL_MONATE.keys()))
@@ -194,15 +182,7 @@ with tab2:
 
 with tab3:
     st.subheader("📋 Liste")
-    ed = st.data_editor(df, use_container_width=True, num_rows="dynamic")
-    if st.button("💾 Liste Synchronisieren"):
+    ed = st.data_editor(df, use_container_width=True, num_rows="dynamic", column_config={"Betrag": st.column_config.NumberColumn(format="%.2f €"), "Monatlich": st.column_config.NumberColumn(format="%.2f €"), "Nächste Fälligkeit": st.column_config.DateColumn(format="DD.MM.YYYY")})
+    if st.button("💾 Speichern"):
         s = ed.copy(); s['Monatlich'] = s.apply(lambda r: float(r['Betrag'])/INTERVALL_MONATE.get(str(r['Intervall']).lower(), 1), axis=1)
-        s['Nächste Fälligkeit'] = pd.to_datetime(s['Nächste Fälligkeit']).dt.strftime('%Y-%m-%d')
-        conn.update(worksheet="Nebenkosten", data=s); st.rerun()
-
-with tab4:
-    st.subheader("📖 Logbuch")
-    try:
-        h = conn.read(worksheet="Historie", ttl="0m")
-        if not h.empty: st.dataframe(h.sort_values("Datum", ascending=False), use_container_width=True)
-    except: st.info("Noch kein Verlauf.")
+        s['Nächste Fälligkeit'] = pd.to_datetime(s['

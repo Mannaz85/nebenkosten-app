@@ -138,4 +138,107 @@ with st.sidebar:
 tab1, tab2, tab3, tab4 = st.tabs(["📊 Status", "➕ Neu", "📋 Liste", "📖 Log"])
 
 with tab1:
-    if not df
+    if not df.empty:
+        aus_df = df[df['Typ'] == "Ausgabe"]; ein_df = df[df['Typ'] == "Einnahme"]
+        
+        st.subheader("🔔 Fälligkeiten")
+        t_ts = pd.Timestamp(datetime.now().date())
+        my_aus = aus_df[(aus_df['Eigentümer'] == "Gemeinsam") | (aus_df['Eigentümer'] == current_user)]
+        due = my_aus[(my_aus['Nächste Fälligkeit'] >= t_ts) & (my_aus['Nächste Fälligkeit'] <= t_ts + pd.Timedelta(days=14))].sort_values("Nächste Fälligkeit")
+        
+        if not due.empty:
+            for _, r in due.iterrows():
+                icon = "👫" if r['Eigentümer'] == "Gemeinsam" else "👤"
+                st.warning(f"**{r['Nächste Fälligkeit'].strftime('%d.%m.')}**: {r['Kostenart']} ({fmt_eur(r['Betrag'])})")
+        else: st.success("Keine anstehenden Zahlungen.")
+        
+        st.divider()
+
+        st.subheader("👫 Gemeinsame Kosten (Monat)")
+        sh_aus_total = aus_df[aus_df['Eigentümer'] == "Gemeinsam"]["Monatlich"].sum()
+        c_sh1, c_sh2 = st.columns(2)
+        with c_sh1:
+            st.markdown(f'<div class="metric-card"><p class="metric-label">Gesamt Haus</p><h2 style="color: #111827; margin:0;">{fmt_eur(sh_aus_total)}</h2></div>', unsafe_allow_html=True)
+        with c_sh2:
+            st.markdown(f'<div class="metric-card"><p class="metric-label">Pro Nase (50%)</p><h2 style="color: #111827; margin:0;">{fmt_eur(sh_aus_total/2)}</h2></div>', unsafe_allow_html=True)
+
+        st.divider()
+
+        st.subheader(f"💰 Finanz-Check: {current_user}")
+        sh_ein_half = ein_df[ein_df['Eigentümer'] == "Gemeinsam"]["Monatlich"].sum() / 2
+        pr_aus = aus_df[aus_df['Eigentümer'] == current_user]["Monatlich"].sum()
+        pr_ein = ein_df[ein_df['Eigentümer'] == current_user]["Monatlich"].sum()
+        
+        total_inc = pr_ein + sh_ein_half
+        total_exp = pr_aus + (sh_aus_total / 2)
+        free_budget = total_inc - total_exp
+        budget_color = "#28a745" if free_budget > 0 else "#dc3545" if free_budget < 0 else "#111827"
+
+        c_f1, c_f2, c_f3 = st.columns(3)
+        with c_f1:
+            st.markdown(f'<div class="metric-card"><p class="metric-label">Deine Einnahmen</p><h2 style="color: #111827; margin:0;">{fmt_eur(total_inc)}</h2></div>', unsafe_allow_html=True)
+        with c_f2:
+            st.markdown(f'<div class="metric-card"><p class="metric-label">Deine Ausgaben</p><h2 style="color: #111827; margin:0;">{fmt_eur(total_exp)}</h2></div>', unsafe_allow_html=True)
+        with c_f3:
+            st.markdown(f'<div class="metric-card"><p class="metric-label">Freies Budget</p><h2 style="color: {budget_color}; margin:0;">{fmt_eur(free_budget)}</h2></div>', unsafe_allow_html=True)
+
+        st.divider()
+        st.subheader("📊 Ausgaben-Verteilung")
+        if not my_aus.empty:
+            fig = px.pie(my_aus.groupby("Hauptkategorie")["Monatlich"].sum().reset_index(), values='Monatlich', names='Hauptkategorie', hole=0.5)
+            fig.update_layout(margin=dict(t=30, b=20, l=10, r=10), height=400, showlegend=True)
+            st.plotly_chart(fig, use_container_width=True, config={'staticPlot': True, 'displayModeBar': False})
+    else:
+        st.info("Noch keine Daten vorhanden.")
+
+with tab2:
+    st.subheader("➕ Neu")
+    t = st.radio("Typ", ["Ausgabe", "Einnahme"], horizontal=True)
+    with st.form("new_entry", clear_on_submit=True):
+        o = st.radio("Wer?", ["Gemeinsam", PERSONEN[0], PERSONEN[1]], horizontal=True)
+        k = st.selectbox("Kategorie", HAUPTKATEGORIEN if t=="Ausgabe" else ["Gehalt", "Zinsen", "Sonstiges"])
+        n = st.text_input("Bezeichnung")
+        v = st.number_input("Betrag €", step=0.01)
+        tur = st.selectbox("Intervall", list(INTERVALL_MONATE.keys()))
+        d = st.date_input("Datum", format="DD.MM.YYYY")
+        if st.form_submit_button("Speichern", use_container_width=True):
+            if v and n:
+                new_val = float(v)
+                new_row = pd.DataFrame([{
+                    "Eigentümer": o, "Typ": t, "Hauptkategorie": k, "Kostenart": n, 
+                    "Betrag": new_val, "Intervall": tur, 
+                    "Monatlich": new_val / INTERVALL_MONATE[tur], 
+                    "Nächste Fälligkeit": pd.to_datetime(d)
+                }])
+                upd = pd.concat([df, new_row], ignore_index=True)
+                s = upd.copy()
+                s['Nächste Fälligkeit'] = s['Nächste Fälligkeit'].dt.strftime('%Y-%m-%d')
+                conn.update(worksheet="Nebenkosten", data=s)
+                st.success("Erfolgreich gespeichert!")
+                st.rerun()
+
+with tab3:
+    st.subheader("📋 Liste")
+    if not df.empty:
+        ed = st.data_editor(df, use_container_width=True, num_rows="dynamic", column_config={
+            "Betrag": st.column_config.NumberColumn(format="%.2f €"), 
+            "Monatlich": st.column_config.NumberColumn(format="%.2f €"), 
+            "Nächste Fälligkeit": st.column_config.DateColumn(format="DD.MM.YYYY")
+        })
+        if st.button("💾 Speichern"):
+            s = ed.copy()
+            s['Monatlich'] = s.apply(lambda r: float(r['Betrag']) / INTERVALL_MONATE.get(str(r['Intervall']).lower(), 1), axis=1)
+            s['Nächste Fälligkeit'] = pd.to_datetime(s['Nächste Fälligkeit']).dt.strftime('%Y-%m-%d')
+            conn.update(worksheet="Nebenkosten", data=s)
+            st.rerun()
+
+with tab4:
+    st.subheader("📖 Logbuch")
+    try:
+        h = conn.read(worksheet="Historie", ttl="0m")
+        if not h.empty:
+            st.dataframe(h.sort_values("Datum", ascending=False), use_container_width=True)
+        else:
+            st.info("Logbuch ist noch leer.")
+    except:
+        st.info("Noch kein Verlauf vorhanden.")

@@ -5,11 +5,11 @@ import plotly.express as px
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import extra_streamlit_components as stx
+import time
 
-# --- 1. DESIGN & CSS (MOBIL-OPTIMIERT & DYNAMISCH) ---
-st.set_page_config(page_title="Haus-Manager Pro", layout="wide", page_icon="🏦")
+# --- 1. SETUP & DESIGN ---
+st.set_page_config(page_title="Haus-Manager Pro (Test)", layout="wide", page_icon="🏦")
 
-# CSS für einheitliche Karten-Optik
 st.markdown("""
     <style>
     .metric-card {
@@ -27,6 +27,7 @@ st.markdown("""
 
 # --- 2. KONFIGURATION ---
 PERSONEN = ["Philipp", "Miri"] 
+WORKSHEET_NAME = "Test_Daten"  # Zentraler Name des Worksheets
 INTERVALL_MONATE = {"monatlich": 1, "quartalsweise": 3, "halbjährlich": 6, "jährlich": 12}
 HAUPTKATEGORIEN = ["Wohnen & Haushalt", "Mobilität", "Lebensmittel", "Versicherungen", "Abos & Medien", "Freizeit & Urlaub", "Sparen", "Sonstiges"]
 
@@ -34,32 +35,43 @@ def fmt_eur(val):
     if val is None or pd.isna(val): return "0,00 €"
     return f"{val:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
 
-# --- 3. SICHERHEIT (LOGIN) ---
-def get_manager(): return stx.CookieManager()
-cookie_manager = get_manager()
+# --- 3. COOKIE & AUTH LOGIK ---
+@st.cache_resource
+def get_cookie_manager():
+    return stx.CookieManager()
 
-def check_password():
-    if st.session_state.get("authenticated"): return True
-    auth_cookie = cookie_manager.get("haushalts_auth")
-    if "password" in st.secrets and auth_cookie == st.secrets["password"]:
-        st.session_state["authenticated"] = True
-        return True
+cookie_manager = get_cookie_manager()
+time.sleep(0.1) 
+
+def check_auth_and_user():
+    if not st.session_state.get("authenticated"):
+        auth_cookie = cookie_manager.get("haushalts_auth")
+        if auth_cookie and "password" in st.secrets and auth_cookie == st.secrets["password"]:
+            st.session_state["authenticated"] = True
     
-    st.markdown("<h2 style='text-align: center;'>🏦 Haus-Manager Login</h2>", unsafe_allow_html=True)
-    with st.container():
-        _, col, _ = st.columns([1,2,1])
-        with col:
-            with st.form("Login"):
-                pwd_input = st.text_input("Passwort", type="password")
-                if st.form_submit_button("Anmelden", use_container_width=True):
-                    if "password" in st.secrets and pwd_input == st.secrets["password"]:
-                        st.session_state["authenticated"] = True
-                        cookie_manager.set("haushalts_auth", pwd_input, expires_at=datetime.now() + timedelta(days=30))
-                        st.rerun()
-                    else: st.error("Passwort falsch!")
-    return False
+    if "current_user" not in st.session_state:
+        saved_user = cookie_manager.get("haushalts_user")
+        if saved_user in PERSONEN:
+            st.session_state["current_user"] = saved_user
+        else:
+            st.session_state["current_user"] = PERSONEN[0]
 
-if not check_password(): st.stop()
+check_auth_and_user()
+
+if not st.session_state.get("authenticated"):
+    st.markdown("<h2 style='text-align: center;'>🏦 Haus-Manager Login</h2>", unsafe_allow_html=True)
+    _, col, _ = st.columns([1,2,1])
+    with col:
+        with st.form("Login"):
+            pwd_input = st.text_input("Passwort", type="password")
+            if st.form_submit_button("Anmelden", use_container_width=True):
+                if "password" in st.secrets and pwd_input == st.secrets["password"]:
+                    st.session_state["authenticated"] = True
+                    cookie_manager.set("haushalts_auth", pwd_input, expires_at=datetime.now() + timedelta(days=30))
+                    st.rerun()
+                else:
+                    st.error("Passwort falsch!")
+    st.stop()
 
 # --- 4. DATEN-LOGIK ---
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -81,7 +93,7 @@ def check_and_update_dates(df):
                     updated = True
     if updated:
         save_df = df.copy(); save_df['Nächste Fälligkeit'] = save_df['Nächste Fälligkeit'].dt.strftime('%Y-%m-%d')
-        conn.update(worksheet="Nebenkosten", data=save_df)
+        conn.update(worksheet=WORKSHEET_NAME, data=save_df)
         if new_hist:
             try: h_df = conn.read(worksheet="Historie", ttl="0m")
             except: h_df = pd.DataFrame(columns=["Datum", "Eigentümer", "Typ", "Kostenart", "Betrag"])
@@ -91,7 +103,7 @@ def check_and_update_dates(df):
 
 def load_data():
     try:
-        data = conn.read(worksheet="Nebenkosten", ttl="0m")
+        data = conn.read(worksheet=WORKSHEET_NAME, ttl="0m")
         if data.empty: return pd.DataFrame(columns=["Eigentümer", "Typ", "Hauptkategorie", "Kostenart", "Betrag", "Intervall", "Monatlich", "Nächste Fälligkeit"])
         data.columns = [c.strip() for c in data.columns]
         if "Typ" not in data.columns: data["Typ"] = "Ausgabe"
@@ -105,12 +117,23 @@ df = load_data()
 # --- 5. SIDEBAR ---
 with st.sidebar:
     st.title("👤 Profil")
-    current_user = st.selectbox("Wer bist du?", PERSONEN)
+    try:
+        default_idx = PERSONEN.index(st.session_state["current_user"])
+    except:
+        default_idx = 0
+    current_user = st.selectbox("Wer bist du?", PERSONEN, index=default_idx)
+    
+    if current_user != st.session_state.get("current_user"):
+        st.session_state["current_user"] = current_user
+        cookie_manager.set("haushalts_user", current_user, expires_at=datetime.now() + timedelta(days=90))
+    
     st.divider()
     if not df.empty:
         st.download_button("💾 Backup CSV", df.to_csv(index=False).encode('utf-8'), "finanz_backup.csv", "text/csv", use_container_width=True)
     if st.button("🚪 Logout", use_container_width=True):
-        cookie_manager.delete("haushalts_auth"); st.session_state["authenticated"] = False; st.rerun()
+        cookie_manager.delete("haushalts_auth")
+        st.session_state["authenticated"] = False
+        st.rerun()
 
 # --- 6. HAUPTSEITE (TABS) ---
 tab1, tab2, tab3, tab4 = st.tabs(["📊 Status", "➕ Neu", "📋 Liste", "📖 Log"])
@@ -118,81 +141,7 @@ tab1, tab2, tab3, tab4 = st.tabs(["📊 Status", "➕ Neu", "📋 Liste", "📖 
 with tab1:
     if not df.empty:
         aus_df = df[df['Typ'] == "Ausgabe"]; ein_df = df[df['Typ'] == "Einnahme"]
-        sh_aus = aus_df[aus_df['Eigentümer'] == "Gemeinsam"]["Monatlich"].sum()
-        sh_ein = ein_df[ein_df['Eigentümer'] == "Gemeinsam"]["Monatlich"].sum() / 2
-        pr_aus = aus_df[aus_df['Eigentümer'] == current_user]["Monatlich"].sum()
-        pr_ein = ein_df[ein_df['Eigentümer'] == current_user]["Monatlich"].sum()
         
-        inc = pr_ein + sh_ein; load = pr_aus + (sh_aus / 2); free = inc - load
-
-        # DYNAMISCHES FARB-STYLING FÜR BUDGET
-        budget_color = "#28a745" if free > 0 else "#dc3545" if free < 0 else "#111827"
-
-        st.subheader("Finanz-Check")
-        c_m1, c_m2, c_m3 = st.columns(3)
-        with c_m1:
-            st.markdown(f'<div class="metric-card"><p class="metric-label">Einnahmen</p><h2 style="color: #111827; margin:0;">{fmt_eur(inc)}</h2></div>', unsafe_allow_html=True)
-        with c_m2:
-            st.markdown(f'<div class="metric-card"><p class="metric-label">Ausgaben</p><h2 style="color: #111827; margin:0;">{fmt_eur(load)}</h2></div>', unsafe_allow_html=True)
-        with c_m3:
-            st.markdown(f'<div class="metric-card"><p class="metric-label">Freies Budget</p><h2 style="color: {budget_color}; margin:0;">{fmt_eur(free)}</h2></div>', unsafe_allow_html=True)
-
-        with st.expander("🔍 Details"):
-            st.write(f"Privat: {fmt_eur(pr_aus)} | Haus (50% Anteil): {fmt_eur(sh_aus/2)}")
-
-        st.divider()
-        st.subheader("🔔 Nächste Termine")
+        st.subheader("🔔 Fälligkeiten")
         t_ts = pd.Timestamp(datetime.now().date())
-        my_aus = aus_df[(aus_df['Eigentümer'] == "Gemeinsam") | (aus_df['Eigentümer'] == current_user)]
-        due = my_aus[(my_aus['Nächste Fälligkeit'] >= t_ts) & (my_aus['Nächste Fälligkeit'] <= t_ts + pd.Timedelta(days=14))].sort_values("Nächste Fälligkeit")
-        
-        if not due.empty:
-            for _, r in due.iterrows():
-                st.warning(f"**{r['Nächste Fälligkeit'].strftime('%d.%m.')}**: {r['Kostenart']} ({fmt_eur(r['Betrag'])})")
-        else: st.success("Alles im Plan!")
-
-        st.divider()
-        st.subheader("📊 Ausgaben nach Kategorien")
-        
-        if not my_aus.empty:
-            chart_config = {'staticPlot': True, 'displayModeBar': False}
-            fig = px.pie(my_aus.groupby("Hauptkategorie")["Monatlich"].sum().reset_index(), 
-                         values='Monatlich', names='Hauptkategorie', hole=0.5)
-            # Legende aktiviert für bessere Lesbarkeit am Handy/PC
-            fig.update_layout(margin=dict(t=30, b=20, l=10, r=10), height=400, showlegend=True)
-            st.plotly_chart(fig, use_container_width=True, config=chart_config)
-        else:
-            st.info("Noch keine Ausgaben für Diagramm vorhanden.")
-
-with tab2:
-    st.subheader("➕ Neu")
-    t = st.radio("Typ", ["Ausgabe", "Einnahme"], horizontal=True)
-    with st.form("new_entry", clear_on_submit=True):
-        o = st.radio("Wer?", ["Gemeinsam", PERSONEN[0], PERSONEN[1]], horizontal=True)
-        k = st.selectbox("Kategorie", HAUPTKATEGORIEN if t=="Ausgabe" else ["Gehalt", "Zinsen", "Sonstiges"])
-        n = st.text_input("Bezeichnung")
-        v = st.number_input("Betrag €", step=0.01)
-        tur = st.selectbox("Intervall", list(INTERVALL_MONATE.keys()))
-        d = st.date_input("Datum", format="DD.MM.YYYY")
-        if st.form_submit_button("Speichern", use_container_width=True):
-            if v and n:
-                new = pd.DataFrame([{"Eigentümer":o, "Typ":t, "Hauptkategorie":k, "Kostenart":n, "Betrag":float(v), "Intervall":tur, "Monatlich":float(v)/INTERVALL_MONATE[tur], "Nächste Fälligkeit":pd.to_datetime(d)}])
-                upd = pd.concat([df, new], ignore_index=True); s = upd.copy(); s['Nächste Fälligkeit'] = s['Nächste Fälligkeit'].dt.strftime('%Y-%m-%d')
-                conn.update(worksheet="Nebenkosten", data=s); st.rerun()
-
-with tab3:
-    st.subheader("📋 Liste")
-    ed = st.data_editor(df, use_container_width=True, num_rows="dynamic", column_config={"Betrag": st.column_config.NumberColumn(format="%.2f €"), "Monatlich": st.column_config.NumberColumn(format="%.2f €"), "Nächste Fälligkeit": st.column_config.DateColumn(format="DD.MM.YYYY")})
-    if st.button("💾 Liste Synchronisieren"):
-        s = ed.copy()
-        s['Monatlich'] = s.apply(lambda r: float(r['Betrag'])/INTERVALL_MONATE.get(str(r['Intervall']).lower(), 1), axis=1)
-        # FIX: Vollständige Zeile für fehlerfreies Speichern
-        s['Nächste Fälligkeit'] = pd.to_datetime(s['Nächste Fälligkeit']).dt.strftime('%Y-%m-%d')
-        conn.update(worksheet="Nebenkosten", data=s); st.rerun()
-
-with tab4:
-    st.subheader("📖 Logbuch")
-    try:
-        h = conn.read(worksheet="Historie", ttl="0m")
-        if not h.empty: st.dataframe(h.sort_values("Datum", ascending=False), use_container_width=True)
-    except: st.info("Noch kein Verlauf.")
+        my_aus = aus_df[(aus_

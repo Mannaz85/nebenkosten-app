@@ -8,7 +8,7 @@ import extra_streamlit_components as stx
 import time
 
 # --- 1. SETUP & DESIGN ---
-st.set_page_config(page_title="Haus-Manager Pro (Test)", layout="wide", page_icon="🏦")
+st.set_page_config(page_title="Haus-Manager Pro", layout="wide", page_icon="🏦")
 
 st.markdown("""
     <style>
@@ -27,7 +27,6 @@ st.markdown("""
 
 # --- 2. KONFIGURATION ---
 PERSONEN = ["Philipp", "Miri"] 
-WORKSHEET_NAME = "Test_Daten"  # Zentraler Name des Worksheets
 INTERVALL_MONATE = {"monatlich": 1, "quartalsweise": 3, "halbjährlich": 6, "jährlich": 12}
 HAUPTKATEGORIEN = ["Wohnen & Haushalt", "Mobilität", "Lebensmittel", "Versicherungen", "Abos & Medien", "Freizeit & Urlaub", "Sparen", "Sonstiges"]
 
@@ -93,7 +92,7 @@ def check_and_update_dates(df):
                     updated = True
     if updated:
         save_df = df.copy(); save_df['Nächste Fälligkeit'] = save_df['Nächste Fälligkeit'].dt.strftime('%Y-%m-%d')
-        conn.update(worksheet=WORKSHEET_NAME, data=save_df)
+        conn.update(worksheet="Nebenkosten", data=save_df)
         if new_hist:
             try: h_df = conn.read(worksheet="Historie", ttl="0m")
             except: h_df = pd.DataFrame(columns=["Datum", "Eigentümer", "Typ", "Kostenart", "Betrag"])
@@ -103,7 +102,7 @@ def check_and_update_dates(df):
 
 def load_data():
     try:
-        data = conn.read(worksheet=WORKSHEET_NAME, ttl="0m")
+        data = conn.read(worksheet="Nebenkosten", ttl="0m")
         if data.empty: return pd.DataFrame(columns=["Eigentümer", "Typ", "Hauptkategorie", "Kostenart", "Betrag", "Intervall", "Monatlich", "Nächste Fälligkeit"])
         data.columns = [c.strip() for c in data.columns]
         if "Typ" not in data.columns: data["Typ"] = "Ausgabe"
@@ -139,9 +138,4 @@ with st.sidebar:
 tab1, tab2, tab3, tab4 = st.tabs(["📊 Status", "➕ Neu", "📋 Liste", "📖 Log"])
 
 with tab1:
-    if not df.empty:
-        aus_df = df[df['Typ'] == "Ausgabe"]; ein_df = df[df['Typ'] == "Einnahme"]
-        
-        st.subheader("🔔 Fälligkeiten")
-        t_ts = pd.Timestamp(datetime.now().date())
-        my_aus = aus_df[(aus_
+    if not df
